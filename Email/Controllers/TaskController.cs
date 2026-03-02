@@ -163,7 +163,26 @@ namespace TaskManagement.Controllers
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                //  story points
+                // Role-based authorization
+                var updater = await _context.Accounts.FindAsync(updaterId);
+                if (updater == null)
+                    return NotFound("Updater account not found.");
+
+                if (updater.Role != "Admin")
+                {
+                    var projectMember = await _context.ProjectMembers
+                        .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == updaterId);
+
+                    if (projectMember == null)
+                        return StatusCode(403, "You are not a member of this project.");
+
+                    var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
+
+                    if (!allowedRoles.Contains(projectMember.Role))
+                        return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can update tasks.");
+                }
+
+                // Story points validation
                 if (dto.StoryPoints.HasValue && (dto.StoryPoints < 1 || dto.StoryPoints > 5))
                     return BadRequest("Story points must be between 1 and 5.");
 
@@ -203,7 +222,6 @@ namespace TaskManagement.Controllers
                 task.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
 
-                //  changes
                 if (changes.Any())
                 {
                     _context.TimeLogs.Add(new TimeLog

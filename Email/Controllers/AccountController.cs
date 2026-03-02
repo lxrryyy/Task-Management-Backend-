@@ -114,7 +114,7 @@ namespace TaskManagement.Controllers
             return NoContent();
         }
 
-        // ✅ No admin check - anyone can upload their own profile picture
+        
         [HttpPost("UploadProfilePicture/{id}")]
         public async Task<IActionResult> UploadProfilePicture(int id, IFormFile file)
         {
