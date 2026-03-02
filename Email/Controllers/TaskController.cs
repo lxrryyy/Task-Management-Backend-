@@ -274,7 +274,6 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
-
         // PATCH assign task
         [HttpPatch("AssignTask/{id}")]
         public async Task<IActionResult> AssignTask(int id, [FromBody] AssignTaskDTO dto)
@@ -282,9 +281,31 @@ namespace TaskManagement.Controllers
             try
             {
                 var task = await _context.Tasks.FindAsync(id);
-
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
+
+                // Role-based authorization
+                var assigner = await _context.Accounts.FindAsync(dto.AssignedById);
+                if (assigner == null)
+                    return NotFound("Assigner account not found.");
+
+
+                if (assigner.Role != "Admin")
+                {
+                    if (task.ProjectId == null)
+                        return StatusCode(403, "Task is not associated with any project.");
+
+                    var projectMember = await _context.ProjectMembers
+                        .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById);
+
+                    if (projectMember == null)
+                        return StatusCode(403, "You are not a member of this project.");
+
+                    var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
+
+                    if (!allowedRoles.Contains(projectMember.Role))
+                        return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can assign tasks.");
+                }
 
                 // Remove existing assignments
                 var existing = _context.TaskAssignments.Where(a => a.TaskId == id);

@@ -155,7 +155,7 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // PATCH - Project Manager updates the project
+        // PATCH - Project Manager/Scrum/Admin updates the project
         [HttpPatch("UpdateProject/{projectId}")]
         public async Task<IActionResult> UpdateProject(int projectId, [FromBody] UpdateProjectDTO dto, [FromQuery] int requesterId)
         {
