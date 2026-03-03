@@ -11,7 +11,7 @@ namespace TaskManagement.Models
         [Required]
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string Status { get; set; } = "Not Started"; // Not Started, In Progress, Completed, For Review
+        public string Status { get; set; } = "Not Started"; // Not Started, InProgress, Completed, For Review
         public string? Priority { get; set; } // Urgent, Important, Medium, Low 
         public int ReporterId { get; set; }
         public Account Reporter { get; set; }

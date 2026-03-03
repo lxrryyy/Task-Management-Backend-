@@ -175,7 +175,7 @@ namespace TaskManagement.Controllers
                     Description = project.Description,
                     Status = project.Status,
                     CreatedById = project.CreatedById,
-                    CreatedByName = project.CreatedBy.Name,
+                    CreatedByName = creator.Name,
                     ProjectManagerId = project.ProjectManagerId,
                     ScrumMasterId = project.ScrumMasterId,
                     MemberIds = dto.MemberIds,
@@ -426,7 +426,7 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET my projects
+        // GET my projects for checking if i am an assignee or member of the project
         [HttpGet("GetMyProjects/{accountId}")]
         public async Task<IActionResult> GetMyProjects(int accountId)
         {
@@ -446,6 +446,7 @@ namespace TaskManagement.Controllers
                         Description = p.Description,
                         Status = p.Status,
                         CreatedById = p.CreatedById,
+                        CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
                         MemberIds = p.Members.Select(m => m.AccountId).ToList(),
