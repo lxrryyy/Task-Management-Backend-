@@ -31,6 +31,35 @@ namespace TaskManagement.Controllers
             }
         }
 
+        [HttpGet]
+        public async Task<ActionResult<Account>> GetAllUserRoleAccount()
+        {
+            try
+            {
+                var users = await _context.Accounts
+                    .Where(a => a.Role == "User" && !a.isActive)
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Name,
+                        a.Email,
+                        a.Role,
+                        a.ProfilePicture
+                    })
+                    .ToListAsync();
+
+                if (!users.Any())
+                    return NotFound("No users found.");
+
+                return Ok(users);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+
+        }
+
         [HttpGet("{id}")]
         public async Task<ActionResult<Account>> GetAccountById(int id, [FromQuery] int adminId)
         {
