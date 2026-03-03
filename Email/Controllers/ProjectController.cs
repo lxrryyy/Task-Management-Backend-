@@ -16,6 +16,43 @@ namespace TaskManagement.Controllers
         {
             _context = context;
         }
+        // GET projects created by user
+        [HttpGet("GetProjectsCreatedByMe/{accountId}")]
+        public async Task<IActionResult> GetProjectsCreatedByMe(int accountId)
+        {
+            try
+            {
+                var account = await _context.Accounts.FindAsync(accountId);
+                if (account == null)
+                    return NotFound("Account not found.");
+
+                var projects = await _context.Projects
+                    .Where(p => p.CreatedById == accountId && !p.IsDeleted)
+                    .Select(p => new ProjectResponseDTO
+                    {
+                        Id = p.Id,
+                        Name = p.Name,
+                        Description = p.Description,
+                        Status = p.Status,
+                        CreatedById = p.CreatedById,
+                        ProjectManagerId = p.ProjectManagerId,
+                        ScrumMasterId = p.ScrumMasterId,
+                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        CreatedAt = p.CreatedAt,
+                        UpdatedAt = p.UpdatedAt
+                    })
+                    .ToListAsync();
+
+                if (!projects.Any())
+                    return NotFound("No projects found created by this account.");
+
+                return Ok(projects);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
 
         [HttpPost("CreateProject")]
         public async Task<IActionResult> CreateProject([FromBody] CreateProjectDTO dto, [FromQuery] int creatorId)

@@ -63,7 +63,19 @@ namespace TaskManagement.Controllers
                 _context.ApiTokens.Add(apiToken);
                 await _context.SaveChangesAsync();
 
-                return Ok(new { token, expiresIn = 28800 });
+                return Ok(new 
+                    { 
+                        token, 
+                        expiresIn = 28800,
+                        user = new
+                        {
+                            account.Id,
+                            account.Name,
+                            account.Email,
+                            account.Role,
+                            account.ProfilePicture
+                        }
+                    });
             }
             catch (Exception ex)
             {
