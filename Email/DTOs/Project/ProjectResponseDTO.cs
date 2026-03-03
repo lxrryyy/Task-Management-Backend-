@@ -9,6 +9,8 @@
         public int CreatedById { get; set; }
         public string? CreatedByName { get; set; }
         public int ProjectManagerId { get; set; }
+        public string? ProjectManagerName { get; set; }
+        public string? ScrumMasterName { get; set; }
         public int? ScrumMasterId { get; set; }
         public List<string> MemberNames { get; set; }
         public DateTime CreatedAt { get; set; }

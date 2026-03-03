@@ -37,7 +37,15 @@ namespace TaskManagement.Controllers
                         CreatedById = p.CreatedById,
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
+                        ProjectManagerName = p.Members
+                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
+                        ScrumMasterName = p.Members
+                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                         MemberNames = p.Members
                             .Select(m => m.Account.Name)
                             .ToList(),
@@ -179,7 +187,15 @@ namespace TaskManagement.Controllers
                     CreatedById = project.CreatedById,
                     CreatedByName = creator.Name,
                     ProjectManagerId = project.ProjectManagerId,
+                    ProjectManagerName = project.Members
+                            .Where(m => m.AccountId == project.ProjectManagerId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                     ScrumMasterId = project.ScrumMasterId,
+                    ScrumMasterName = project.Members
+                            .Where(m => m.AccountId == project.ScrumMasterId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
 
                     MemberNames = await _context.ProjectMembers
                         .Where(pm => pm.ProjectId == project.Id)
@@ -384,7 +400,15 @@ namespace TaskManagement.Controllers
                         CreatedById = p.CreatedById,
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
+                        ProjectManagerName = p.Members
+                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
+                        ScrumMasterName = p.Members
+                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt,
 
