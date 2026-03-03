@@ -38,7 +38,9 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        MemberNames = p.Members
+                            .Select(m => m.Account.Name)
+                            .ToList(),
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
@@ -178,7 +180,12 @@ namespace TaskManagement.Controllers
                     CreatedByName = creator.Name,
                     ProjectManagerId = project.ProjectManagerId,
                     ScrumMasterId = project.ScrumMasterId,
-                    MemberIds = dto.MemberIds,
+
+                    MemberNames = await _context.ProjectMembers
+                        .Where(pm => pm.ProjectId == project.Id)
+                        .Select(pm => pm.Account.Name)
+                        .ToListAsync(),
+
                     CreatedAt = project.CreatedAt,
                     UpdatedAt = project.UpdatedAt
                 });
@@ -378,9 +385,12 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
                         CreatedAt = p.CreatedAt,
-                        UpdatedAt = p.UpdatedAt
+                        UpdatedAt = p.UpdatedAt,
+
+                        MemberNames = p.Members
+                        .Select(m => m.Account.Name)
+                        .ToList(),
                     })
                     .ToListAsync();
 
@@ -409,7 +419,9 @@ namespace TaskManagement.Controllers
                         CreatedById = p.CreatedById,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        MemberNames = p.Members
+                            .Select(m => m.Account.Name)
+                            .ToList(),
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
@@ -426,19 +438,14 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET my projects for checking if i am an assignee or member of the project
         [HttpGet("GetMyProjects/{accountId}")]
         public async Task<IActionResult> GetMyProjects(int accountId)
         {
             try
             {
-                var myProjectIds = await _context.ProjectMembers
-                    .Where(m => m.AccountId == accountId)
-                    .Select(m => m.ProjectId)
-                    .ToListAsync();
-
                 var projects = await _context.Projects
-                    .Where(p => myProjectIds.Contains(p.Id) && !p.IsDeleted)
+                    .Where(p => !p.IsDeleted &&
+                                p.Members.Any(m => m.AccountId == accountId))
                     .Select(p => new ProjectResponseDTO
                     {
                         Id = p.Id,
@@ -449,7 +456,11 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+
+                        MemberNames = p.Members
+                            .Select(m => m.Account.Name)
+                            .ToList(),
+
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })

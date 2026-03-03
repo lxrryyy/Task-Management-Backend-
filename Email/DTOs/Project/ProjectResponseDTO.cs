@@ -10,7 +10,7 @@
         public string? CreatedByName { get; set; }
         public int ProjectManagerId { get; set; }
         public int? ScrumMasterId { get; set; }
-        public List<int> MemberIds { get; set; } = new List<int>();
+        public List<string> MemberNames { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }
