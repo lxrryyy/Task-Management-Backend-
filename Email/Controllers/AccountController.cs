@@ -19,12 +19,8 @@ namespace TaskManagement.Controllers
         private readonly PasswordHasher<Account> _passwordHasher = new PasswordHasher<Account>();
 
         [HttpGet]
-        public async Task<ActionResult<List<Account>>> GetAccountsv1([FromQuery] int adminId)
+        public async Task<ActionResult<List<Account>>> GetAccountsv1()
         {
-            var admin = await _context.Accounts.FindAsync(adminId);
-            if (admin == null || admin.Role != "Admin")
-                return StatusCode(403, "Access denied. Admins only.");
-
             try
             {
                 return Ok(await _context.Accounts.ToListAsync());
@@ -114,7 +110,7 @@ namespace TaskManagement.Controllers
             return NoContent();
         }
 
-        // ✅ No admin check - anyone can upload their own profile picture
+        
         [HttpPost("UploadProfilePicture/{id}")]
         public async Task<IActionResult> UploadProfilePicture(int id, IFormFile file)
         {
