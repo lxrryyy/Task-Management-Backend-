@@ -5,9 +5,10 @@
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string Status { get; set; } = "Active"; // Active/OnHold/Completed/Cancelled
+        public string Status { get; set; } = "Not Started"; // Active / Not Started / Completed
 
         public int CreatedById { get; set; }        // who create project
+        public Account CreatedBy { get; set; }
         public int ProjectManagerId { get; set; }   // assigning of project manager
         public int? ScrumMasterId { get; set; }     // assigning of scrum master
 

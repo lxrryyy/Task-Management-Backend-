@@ -35,6 +35,7 @@ namespace TaskManagement.Controllers
                         Description = p.Description,
                         Status = p.Status,
                         CreatedById = p.CreatedById,
+                        CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
                         MemberIds = p.Members.Select(m => m.AccountId).ToList(),
@@ -174,6 +175,7 @@ namespace TaskManagement.Controllers
                     Description = project.Description,
                     Status = project.Status,
                     CreatedById = project.CreatedById,
+                    CreatedByName = project.CreatedBy.Name,
                     ProjectManagerId = project.ProjectManagerId,
                     ScrumMasterId = project.ScrumMasterId,
                     MemberIds = dto.MemberIds,
@@ -373,6 +375,7 @@ namespace TaskManagement.Controllers
                         Description = p.Description,
                         Status = p.Status,
                         CreatedById = p.CreatedById,
+                        CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ScrumMasterId = p.ScrumMasterId,
                         MemberIds = p.Members.Select(m => m.AccountId).ToList(),
@@ -487,6 +490,52 @@ namespace TaskManagement.Controllers
 
                 await _context.SaveChangesAsync();
                 return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+
+        [HttpGet("GetProjectProgress/{projectId}")]
+        public async Task<IActionResult> GetProjectProgress(int projectId)
+        {
+            try
+            {
+                var project = await _context.Projects.FindAsync(projectId);
+                if (project == null || project.IsDeleted)
+                    return NotFound("Project not found.");
+
+                var allTasks = await _context.Tasks
+                    .Where(t => t.ProjectId == projectId && !t.IsDeleted)
+                    .ToListAsync();
+
+                // Only count leaf tasks (tasks with no subtasks) - these are the actual work items
+                var leafTasks = allTasks
+                    .Where(t => !allTasks.Any(sub => sub.ParentTaskId == t.Id))
+                    .ToList();
+
+                var totalTasks = leafTasks.Count;
+                var completedTasks = leafTasks.Count(t => t.Status == "Completed");
+                var inProgressTasks = leafTasks.Count(t => t.Status == "In Progress");
+                var notStartedTasks = leafTasks.Count(t => t.Status == "Not Started");
+                var forReviewTasks = leafTasks.Count(t => t.Status == "For Review");
+
+                var percentage = totalTasks == 0 ? 0 : Math.Round((double)completedTasks / totalTasks * 100, 2);
+
+                return Ok(new
+                {
+                    ProjectId = projectId,
+                    ProjectName = project.Name,
+                    ProjectStatus = project.Status,
+                    TotalLeafTasks = totalTasks,
+                    CompletedTasks = completedTasks,
+                    InProgressTasks = inProgressTasks,
+                    NotStartedTasks = notStartedTasks,
+                    ForReviewTasks = forReviewTasks,
+                    CompletionPercentage = percentage
+                });
             }
             catch (Exception ex)
             {
