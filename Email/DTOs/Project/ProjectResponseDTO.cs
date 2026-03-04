@@ -14,8 +14,8 @@
         public string? ScrumMasterName { get; set; }
         public int? ScrumMasterId { get; set; }
         public List<string> MemberNames { get; set; }
-        public DateTime? StartDate { get; set; }
-        public DateTime? EndDate { get; set; }
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
     }

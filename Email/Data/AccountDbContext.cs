@@ -18,8 +18,9 @@ namespace TaskManagement.Data
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<TimeLog> TimeLogs { get; set; }
         // Project Management
-        public DbSet<Project> Projects { get; set; }              // 👈 add this
-        public DbSet<ProjectMember> ProjectMembers { get; set; }  // 👈 add this
+        public DbSet<Project> Projects { get; set; }            
+        public DbSet<ProjectMember> ProjectMembers { get; set; }
+       
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {

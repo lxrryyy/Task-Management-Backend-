@@ -37,6 +37,7 @@ namespace TaskManagement.Controllers
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
@@ -72,6 +73,7 @@ namespace TaskManagement.Controllers
                         ParentTaskId = t.ParentTaskId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
@@ -126,6 +128,7 @@ namespace TaskManagement.Controllers
                     Title = dto.Title,
                     Description = dto.Description,
                     Priority = dto.Priority,
+                    StartDate = dto.StartDate,
                     DueDate = dto.DueDate,
                     StoryPoints = dto.StoryPoints,
                     ProjectId = dto.ProjectId,
@@ -237,6 +240,11 @@ namespace TaskManagement.Controllers
                 {
                     changes.Add($"Priority: {task.Priority} → {dto.Priority}");
                     task.Priority = dto.Priority;
+                }
+                if (dto.StartDate != null && dto.StartDate != task.StartDate)
+                {
+                    changes.Add($"StartDate: {task.StartDate} → {dto.StartDate}");
+                    task.StartDate = dto.StartDate;
                 }
                 if (dto.DueDate != null && dto.DueDate != task.DueDate)
                 {
