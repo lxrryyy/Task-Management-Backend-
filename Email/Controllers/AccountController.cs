@@ -37,7 +37,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var users = await _context.Accounts
-                    .Where(a => a.Role == "User" && !a.isActive)
+                    .Where(a => a.Role == "User" && a.isActive)
                     .Select(a => new
                     {
                         a.Id,

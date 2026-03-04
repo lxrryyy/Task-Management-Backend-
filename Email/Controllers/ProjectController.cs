@@ -16,6 +16,20 @@ namespace TaskManagement.Controllers
         {
             _context = context;
         }
+
+        private async Task<int> GetProjectCompletionPercentage(int projectId)
+        {
+            var rootTasks = await _context.Tasks
+                .Where(t => t.ProjectId == projectId && !t.IsDeleted && t.ParentTaskId == null)
+                .Select(t => new { t.Status })
+                .ToListAsync();
+
+            if (!rootTasks.Any()) return 0;
+
+            var completed = rootTasks.Count(t => t.Status == "Completed");
+            return (int)Math.Round((double)completed / rootTasks.Count * 100);
+        }
+
         // GET projects created by user
         [HttpGet("GetProjectsCreatedByMe/{accountId}")]
         public async Task<IActionResult> GetProjectsCreatedByMe(int accountId)
@@ -49,6 +63,8 @@ namespace TaskManagement.Controllers
                         MemberNames = p.Members
                             .Select(m => m.Account.Name)
                             .ToList(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
@@ -56,6 +72,8 @@ namespace TaskManagement.Controllers
 
                 if (!projects.Any())
                     return NotFound("No projects found created by this account.");
+                foreach (var p in projects)
+                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
 
                 return Ok(projects);
             }
@@ -106,6 +124,8 @@ namespace TaskManagement.Controllers
                     CreatedById = creatorId,
                     ProjectManagerId = projectManagerId,
                     ScrumMasterId = scrumMasterId,
+                    StartDate = dto.StartDate,  
+                    EndDate = dto.EndDate,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -201,7 +221,8 @@ namespace TaskManagement.Controllers
                         .Where(pm => pm.ProjectId == project.Id)
                         .Select(pm => pm.Account.Name)
                         .ToListAsync(),
-
+                    StartDate = project.StartDate,
+                    EndDate = project.EndDate,
                     CreatedAt = project.CreatedAt,
                     UpdatedAt = project.UpdatedAt
                 });
@@ -352,7 +373,18 @@ namespace TaskManagement.Controllers
                             });
                         }
                     }
+                    if (dto.StartDate != null && dto.StartDate != project.StartDate)
+                    {
+                        changes.Add($"StartDate: {project.StartDate} → {dto.StartDate}");
+                        project.StartDate = dto.StartDate;
+                    }
+                    if (dto.EndDate != null && dto.EndDate != project.EndDate)
+                    {
+                        changes.Add($"EndDate: {project.EndDate} → {dto.EndDate}");
+                        project.EndDate = dto.EndDate;
+                    }
                     changes.Add($"Members updated");
+
                 }
 
                 project.UpdatedAt = DateTime.UtcNow;
@@ -409,6 +441,8 @@ namespace TaskManagement.Controllers
                             .Where(m => m.AccountId == p.ScrumMasterId)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt,
 
@@ -417,6 +451,9 @@ namespace TaskManagement.Controllers
                         .ToList(),
                     })
                     .ToListAsync();
+
+                foreach (var p in projects)
+                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
 
                 return Ok(projects);
             }
@@ -441,11 +478,22 @@ namespace TaskManagement.Controllers
                         Description = p.Description,
                         Status = p.Status,
                         CreatedById = p.CreatedById,
+                        CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
-                        ScrumMasterId = p.ScrumMasterId,
+                        ProjectManagerName = p.Members
+                        .Where(m => m.AccountId == p.ProjectManagerId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),                     
+                                        ScrumMasterId = p.ScrumMasterId,
+                                        ScrumMasterName = p.Members
+                        .Where(m => m.AccountId == p.ScrumMasterId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),                     
                         MemberNames = p.Members
                             .Select(m => m.Account.Name)
                             .ToList(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
@@ -453,6 +501,9 @@ namespace TaskManagement.Controllers
 
                 if (project == null)
                     return NotFound("Project not found.");
+
+            
+                project.CompletionPercentage = await GetProjectCompletionPercentage(project.Id);
 
                 return Ok(project);
             }
@@ -479,16 +530,27 @@ namespace TaskManagement.Controllers
                         CreatedById = p.CreatedById,
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
-                        ScrumMasterId = p.ScrumMasterId,
-
+                        ProjectManagerName = p.Members
+                        .Where(m => m.AccountId == p.ProjectManagerId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),                     
+                                        ScrumMasterId = p.ScrumMasterId,
+                                        ScrumMasterName = p.Members
+                        .Where(m => m.AccountId == p.ScrumMasterId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),
                         MemberNames = p.Members
                             .Select(m => m.Account.Name)
                             .ToList(),
-
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
                     .ToListAsync();
+
+                foreach (var p in projects)
+                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
 
                 return Ok(projects);
             }
@@ -534,49 +596,6 @@ namespace TaskManagement.Controllers
         }
 
 
-        [HttpGet("GetProjectProgress/{projectId}")]
-        public async Task<IActionResult> GetProjectProgress(int projectId)
-        {
-            try
-            {
-                var project = await _context.Projects.FindAsync(projectId);
-                if (project == null || project.IsDeleted)
-                    return NotFound("Project not found.");
-
-                var allTasks = await _context.Tasks
-                    .Where(t => t.ProjectId == projectId && !t.IsDeleted)
-                    .ToListAsync();
-
-                // Only count leaf tasks (tasks with no subtasks) - these are the actual work items
-                var leafTasks = allTasks
-                    .Where(t => !allTasks.Any(sub => sub.ParentTaskId == t.Id))
-                    .ToList();
-
-                var totalTasks = leafTasks.Count;
-                var completedTasks = leafTasks.Count(t => t.Status == "Completed");
-                var inProgressTasks = leafTasks.Count(t => t.Status == "In Progress");
-                var notStartedTasks = leafTasks.Count(t => t.Status == "Not Started");
-                var forReviewTasks = leafTasks.Count(t => t.Status == "For Review");
-
-                var percentage = totalTasks == 0 ? 0 : Math.Round((double)completedTasks / totalTasks * 100, 2);
-
-                return Ok(new
-                {
-                    ProjectId = projectId,
-                    ProjectName = project.Name,
-                    ProjectStatus = project.Status,
-                    TotalLeafTasks = totalTasks,
-                    CompletedTasks = completedTasks,
-                    InProgressTasks = inProgressTasks,
-                    NotStartedTasks = notStartedTasks,
-                    ForReviewTasks = forReviewTasks,
-                    CompletionPercentage = percentage
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
+        
     }
 }

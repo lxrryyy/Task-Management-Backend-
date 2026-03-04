@@ -49,21 +49,40 @@ namespace TaskManagement.Data
                 .HasOne<TaskItem>()
                 .WithMany(t => t.SubTasks)
                 .HasForeignKey(t => t.ParentTaskId)
-                .OnDelete(DeleteBehavior.Restrict); // 👈 add this
+                .OnDelete(DeleteBehavior.Restrict); 
 
             // Project → Tasks
             modelBuilder.Entity<TaskItem>()
                 .HasOne<Project>()
                 .WithMany(p => p.Tasks)
                 .HasForeignKey(t => t.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade); // 👈 add this
+                .OnDelete(DeleteBehavior.Cascade); 
 
             // Project → Members
             modelBuilder.Entity<ProjectMember>()
                 .HasOne<Project>()
                 .WithMany(p => p.Members)
                 .HasForeignKey(m => m.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade); // 👈 add this
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Project>()
+               .HasOne(p => p.CreatedBy)
+               .WithMany()
+               .HasForeignKey(p => p.CreatedById)
+               .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Project>()
+                .HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(nameof(Project.ProjectManagerId))
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Project>()
+                .HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(nameof(Project.ScrumMasterId))
+                .OnDelete(DeleteBehavior.Restrict);
+
         }
     }
 }
