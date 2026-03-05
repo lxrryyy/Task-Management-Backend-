@@ -8,10 +8,11 @@
         public string Status { get; set; } = string.Empty;
         public string? Priority { get; set; }
         public int? StoryPoints { get; set; }
-        public int ReporterId { get; set; }
-        public string? ReporterName { get; set; }
-        public int ProjectId { get; set; }     // 👈 add
-        public int? ParentTaskId { get; set; } // 👈 add
+        public int CreatorId { get; set; }
+        public string? CreatorName { get; set; }
+        public int ProjectId { get; set; }     
+        public int? ParentTaskId { get; set; }
+        public DateTime? StartDate { get; set; }
         public DateTime? DueDate { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }

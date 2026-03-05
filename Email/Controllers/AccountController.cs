@@ -13,10 +13,16 @@ namespace TaskManagement.Controllers
 {
     [Route("api/[controller]/[action]")]
     [ApiController]
-    public class AccountController(AccountDbContext context) : ControllerBase
+    public class AccountController : ControllerBase
     {
-        private readonly AccountDbContext _context = context;
+        private readonly AccountDbContext _context;
         private readonly PasswordHasher<Account> _passwordHasher = new PasswordHasher<Account>();
+        private readonly IConfiguration _config;
+        public AccountController(AccountDbContext context, IConfiguration config)
+        {
+            _context = context;
+            _config = config;
+        }
 
         [HttpGet]
         public async Task<ActionResult<List<Account>>> GetAccountsv1()
@@ -29,6 +35,35 @@ namespace TaskManagement.Controllers
             {
                 return BadRequest($"Internal server error: {ex.Message}");
             }
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<Account>> GetAllUserRoleAccount()
+        {
+            try
+            {
+                var users = await _context.Accounts
+                    .Where(a => a.Role == "User" && a.isActive)
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Name,
+                        a.Email,
+                        a.Role,
+                        a.ProfilePicture
+                    })
+                    .ToListAsync();
+
+                if (!users.Any())
+                    return NotFound("No users found.");
+
+                return Ok(users);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+
         }
 
         [HttpGet("{id}")]
@@ -54,6 +89,35 @@ namespace TaskManagement.Controllers
 
             if (newAccount is null)
                 return BadRequest();
+
+            // validation ng email
+            var allowedDomains = _config.GetSection("AllowedEmailDomains").Get<List<string>>()
+                     ?? new List<string>();
+
+            if (!allowedDomains.Any(domain =>
+                newAccount.Email.EndsWith(domain, StringComparison.OrdinalIgnoreCase)))
+                return BadRequest($"Email must be from an allowed domain: {string.Join(", ", allowedDomains)}");
+
+            // Validate password requirements
+            var password = newAccount.PasswordHash;
+            if (password.Length < 8)
+                return BadRequest("Password must be at least 8 characters.");
+            if (!password.Any(char.IsUpper))
+                return BadRequest("Password must contain at least one uppercase letter.");
+            if (!password.Any(char.IsLower))
+                return BadRequest("Password must contain at least one lowercase letter.");
+            if (!password.Any(char.IsDigit))
+                return BadRequest("Password must contain at least one number.");
+            if (!password.Any(ch => "!@#$%^&*()_+-=[]{}|;':\",./<>?".Contains(ch)))
+                return BadRequest("Password must contain at least one special character (!@#$%^&*...).");
+
+            
+
+            // check if email already exists
+            var emailExists = await _context.Accounts
+                .AnyAsync(a => a.Email.ToLower() == newAccount.Email.ToLower());
+            if (emailExists)
+                return BadRequest("Email already exists.");
 
             newAccount.PasswordHash = _passwordHasher.HashPassword(newAccount, newAccount.PasswordHash);
             newAccount.CreatedAt = DateTime.UtcNow;

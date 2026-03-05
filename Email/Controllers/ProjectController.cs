@@ -16,6 +16,20 @@ namespace TaskManagement.Controllers
         {
             _context = context;
         }
+
+        private async Task<int> GetProjectCompletionPercentage(int projectId)
+        {
+            var rootTasks = await _context.Tasks
+                .Where(t => t.ProjectId == projectId && !t.IsDeleted && t.ParentTaskId == null)
+                .Select(t => new { t.Status })
+                .ToListAsync();
+
+            if (!rootTasks.Any()) return 0;
+
+            var completed = rootTasks.Count(t => t.Status == "Completed");
+            return (int)Math.Round((double)completed / rootTasks.Count * 100);
+        }
+
         // GET projects created by user
         [HttpGet("GetProjectsCreatedByMe/{accountId}")]
         public async Task<IActionResult> GetProjectsCreatedByMe(int accountId)
@@ -37,8 +51,20 @@ namespace TaskManagement.Controllers
                         CreatedById = p.CreatedById,
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
+                        ProjectManagerName = p.Members
+                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        ScrumMasterName = p.Members
+                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
+                        MemberNames = p.Members
+                            .Select(m => m.Account.Name)
+                            .ToList(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
@@ -46,6 +72,8 @@ namespace TaskManagement.Controllers
 
                 if (!projects.Any())
                     return NotFound("No projects found created by this account.");
+                foreach (var p in projects)
+                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
 
                 return Ok(projects);
             }
@@ -96,6 +124,8 @@ namespace TaskManagement.Controllers
                     CreatedById = creatorId,
                     ProjectManagerId = projectManagerId,
                     ScrumMasterId = scrumMasterId,
+                    StartDate = dto.StartDate,  
+                    EndDate = dto.EndDate,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -175,10 +205,24 @@ namespace TaskManagement.Controllers
                     Description = project.Description,
                     Status = project.Status,
                     CreatedById = project.CreatedById,
-                    CreatedByName = project.CreatedBy.Name,
+                    CreatedByName = creator.Name,
                     ProjectManagerId = project.ProjectManagerId,
+                    ProjectManagerName = project.Members
+                            .Where(m => m.AccountId == project.ProjectManagerId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                     ScrumMasterId = project.ScrumMasterId,
-                    MemberIds = dto.MemberIds,
+                    ScrumMasterName = project.Members
+                            .Where(m => m.AccountId == project.ScrumMasterId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
+
+                    MemberNames = await _context.ProjectMembers
+                        .Where(pm => pm.ProjectId == project.Id)
+                        .Select(pm => pm.Account.Name)
+                        .ToListAsync(),
+                    StartDate = project.StartDate,
+                    EndDate = project.EndDate,
                     CreatedAt = project.CreatedAt,
                     UpdatedAt = project.UpdatedAt
                 });
@@ -194,7 +238,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // PATCH - Project Manager/Scrum/Admin updates the project
         [HttpPatch("UpdateProject/{projectId}")]
         public async Task<IActionResult> UpdateProject(int projectId, [FromBody] UpdateProjectDTO dto, [FromQuery] int requesterId)
         {
@@ -204,12 +247,10 @@ namespace TaskManagement.Controllers
                 if (project == null || project.IsDeleted)
                     return NotFound("Project not found.");
 
-                // Check if requester is the Project Manager or Admin
                 var requester = await _context.Accounts.FindAsync(requesterId);
                 if (requester == null)
                     return NotFound("Requester account not found.");
 
-                // Check if requester is Project Manager of this project
                 var projectMember = await _context.ProjectMembers
                     .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId);
 
@@ -222,7 +263,6 @@ namespace TaskManagement.Controllers
 
                 var changes = new List<string>();
 
-                // Update basic fields
                 if (dto.Name != null && dto.Name != project.Name)
                 {
                     changes.Add($"Name: {project.Name} → {dto.Name}");
@@ -239,16 +279,14 @@ namespace TaskManagement.Controllers
                     project.Status = dto.Status;
                 }
 
-                // Update Project Manager
-                if (dto.ProjectManagerId.HasValue && dto.ProjectManagerId != project.ProjectManagerId)
+                // Only Admin can update Project Manager
+                if (isAdmin && dto.ProjectManagerId.HasValue && dto.ProjectManagerId != project.ProjectManagerId)
                 {
-                    // Remove old PM role
                     var oldPm = await _context.ProjectMembers
                         .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == project.ProjectManagerId);
                     if (oldPm != null)
                         _context.ProjectMembers.Remove(oldPm);
 
-                    // Add new PM
                     var newPmExists = await _context.ProjectMembers
                         .AnyAsync(m => m.ProjectId == projectId && m.AccountId == dto.ProjectManagerId.Value);
                     if (!newPmExists)
@@ -269,7 +307,6 @@ namespace TaskManagement.Controllers
                 // Update Scrum Master
                 if (dto.ScrumMasterId != project.ScrumMasterId)
                 {
-                    // Remove old SM role
                     if (project.ScrumMasterId.HasValue)
                     {
                         var oldSm = await _context.ProjectMembers
@@ -278,7 +315,6 @@ namespace TaskManagement.Controllers
                             _context.ProjectMembers.Remove(oldSm);
                     }
 
-                    // Add new SM
                     if (dto.ScrumMasterId.HasValue)
                     {
                         var newSmExists = await _context.ProjectMembers
@@ -299,26 +335,27 @@ namespace TaskManagement.Controllers
                     project.ScrumMasterId = dto.ScrumMasterId;
                 }
 
-                // Update Members
-                if (dto.MemberIds != null)
+                // Update Assignees (members with Role = "Member")
+                if (dto.AssigneeIds != null)
                 {
-                    // Validate no duplicates
-                    if (dto.MemberIds.Distinct().Count() != dto.MemberIds.Count)
-                        return BadRequest("Duplicate member IDs are not allowed.");
+                    if (dto.AssigneeIds.Distinct().Count() != dto.AssigneeIds.Count)
+                        return BadRequest("Duplicate assignee IDs are not allowed.");
 
-                    // Remove existing members only (not PM or SM)
                     var existingMembers = await _context.ProjectMembers
                         .Where(m => m.ProjectId == projectId && m.Role == "Member")
                         .ToListAsync();
-                    _context.ProjectMembers.RemoveRange(existingMembers);
 
-                    // Add new members
-                    foreach (var memberId in dto.MemberIds.Distinct())
+                    var toRemove = existingMembers
+                        .Where(m => !dto.AssigneeIds.Contains(m.AccountId))
+                        .ToList();
+                    _context.ProjectMembers.RemoveRange(toRemove);
+
+                    foreach (var memberId in dto.AssigneeIds.Distinct())
                     {
-                        var alreadyAdded = await _context.ProjectMembers
+                        var alreadyExists = await _context.ProjectMembers
                             .AnyAsync(m => m.ProjectId == projectId && m.AccountId == memberId);
 
-                        if (!alreadyAdded)
+                        if (!alreadyExists)
                         {
                             _context.ProjectMembers.Add(new ProjectMember
                             {
@@ -329,12 +366,24 @@ namespace TaskManagement.Controllers
                             });
                         }
                     }
-                    changes.Add($"Members updated");
+                    changes.Add("Assignees updated");
                 }
+
+                if (dto.StartDate.HasValue && dto.StartDate != project.StartDate)
+                {
+                    changes.Add($"StartDate: {project.StartDate} → {dto.StartDate}");
+                    project.StartDate = dto.StartDate.Value;
+                }
+                if (dto.EndDate.HasValue && dto.EndDate != project.EndDate)
+                {
+                    changes.Add($"EndDate: {project.EndDate} → {dto.EndDate}");
+                    project.EndDate = dto.EndDate.Value;
+                }
+                if (dto.StartDate.HasValue && dto.EndDate.HasValue && dto.EndDate <= dto.StartDate)
+                    return BadRequest("End date must be after start date.");
 
                 project.UpdatedAt = DateTime.UtcNow;
 
-                // Log changes
                 if (changes.Any())
                 {
                     _context.TimeLogs.Add(new TimeLog
@@ -377,12 +426,28 @@ namespace TaskManagement.Controllers
                         CreatedById = p.CreatedById,
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
+                        ProjectManagerName = p.Members
+                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        ScrumMasterName = p.Members
+                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Select(m => m.Account.Name)
+                            .FirstOrDefault(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
-                        UpdatedAt = p.UpdatedAt
+                        UpdatedAt = p.UpdatedAt,
+
+                        MemberNames = p.Members
+                        .Select(m => m.Account.Name)
+                        .ToList(),
                     })
                     .ToListAsync();
+
+                foreach (var p in projects)
+                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
 
                 return Ok(projects);
             }
@@ -407,9 +472,22 @@ namespace TaskManagement.Controllers
                         Description = p.Description,
                         Status = p.Status,
                         CreatedById = p.CreatedById,
+                        CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
-                        ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        ProjectManagerName = p.Members
+                        .Where(m => m.AccountId == p.ProjectManagerId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),                     
+                                        ScrumMasterId = p.ScrumMasterId,
+                                        ScrumMasterName = p.Members
+                        .Where(m => m.AccountId == p.ScrumMasterId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),                     
+                        MemberNames = p.Members
+                            .Select(m => m.Account.Name)
+                            .ToList(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
@@ -417,6 +495,9 @@ namespace TaskManagement.Controllers
 
                 if (project == null)
                     return NotFound("Project not found.");
+
+            
+                project.CompletionPercentage = await GetProjectCompletionPercentage(project.Id);
 
                 return Ok(project);
             }
@@ -426,19 +507,14 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET my projects
         [HttpGet("GetMyProjects/{accountId}")]
         public async Task<IActionResult> GetMyProjects(int accountId)
         {
             try
             {
-                var myProjectIds = await _context.ProjectMembers
-                    .Where(m => m.AccountId == accountId)
-                    .Select(m => m.ProjectId)
-                    .ToListAsync();
-
                 var projects = await _context.Projects
-                    .Where(p => myProjectIds.Contains(p.Id) && !p.IsDeleted)
+                    .Where(p => !p.IsDeleted &&
+                                p.Members.Any(m => m.AccountId == accountId))
                     .Select(p => new ProjectResponseDTO
                     {
                         Id = p.Id,
@@ -446,13 +522,29 @@ namespace TaskManagement.Controllers
                         Description = p.Description,
                         Status = p.Status,
                         CreatedById = p.CreatedById,
+                        CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
-                        ScrumMasterId = p.ScrumMasterId,
-                        MemberIds = p.Members.Select(m => m.AccountId).ToList(),
+                        ProjectManagerName = p.Members
+                        .Where(m => m.AccountId == p.ProjectManagerId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),                     
+                                        ScrumMasterId = p.ScrumMasterId,
+                                        ScrumMasterName = p.Members
+                        .Where(m => m.AccountId == p.ScrumMasterId)
+                        .Select(m => m.Account.Name)
+                        .FirstOrDefault(),
+                        MemberNames = p.Members
+                            .Select(m => m.Account.Name)
+                            .ToList(),
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
                         CreatedAt = p.CreatedAt,
                         UpdatedAt = p.UpdatedAt
                     })
                     .ToListAsync();
+
+                foreach (var p in projects)
+                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
 
                 return Ok(projects);
             }
@@ -498,49 +590,6 @@ namespace TaskManagement.Controllers
         }
 
 
-        [HttpGet("GetProjectProgress/{projectId}")]
-        public async Task<IActionResult> GetProjectProgress(int projectId)
-        {
-            try
-            {
-                var project = await _context.Projects.FindAsync(projectId);
-                if (project == null || project.IsDeleted)
-                    return NotFound("Project not found.");
-
-                var allTasks = await _context.Tasks
-                    .Where(t => t.ProjectId == projectId && !t.IsDeleted)
-                    .ToListAsync();
-
-                // Only count leaf tasks (tasks with no subtasks) - these are the actual work items
-                var leafTasks = allTasks
-                    .Where(t => !allTasks.Any(sub => sub.ParentTaskId == t.Id))
-                    .ToList();
-
-                var totalTasks = leafTasks.Count;
-                var completedTasks = leafTasks.Count(t => t.Status == "Completed");
-                var inProgressTasks = leafTasks.Count(t => t.Status == "In Progress");
-                var notStartedTasks = leafTasks.Count(t => t.Status == "Not Started");
-                var forReviewTasks = leafTasks.Count(t => t.Status == "For Review");
-
-                var percentage = totalTasks == 0 ? 0 : Math.Round((double)completedTasks / totalTasks * 100, 2);
-
-                return Ok(new
-                {
-                    ProjectId = projectId,
-                    ProjectName = project.Name,
-                    ProjectStatus = project.Status,
-                    TotalLeafTasks = totalTasks,
-                    CompletedTasks = completedTasks,
-                    InProgressTasks = inProgressTasks,
-                    NotStartedTasks = notStartedTasks,
-                    ForReviewTasks = forReviewTasks,
-                    CompletionPercentage = percentage
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
+        
     }
 }

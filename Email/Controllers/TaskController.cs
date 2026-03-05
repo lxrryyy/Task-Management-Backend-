@@ -33,9 +33,11 @@ namespace TaskManagement.Controllers
                         Description = t.Description,
                         Status = t.Status,
                         Priority = t.Priority,
-                        ReporterId = t.ReporterId,
-                        ReporterName = t.Reporter.Name,
+                        ParentTaskId = t.ParentTaskId,
+                        CreatorId = t.CreatorId,
+                        CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
@@ -66,9 +68,12 @@ namespace TaskManagement.Controllers
                         Description = t.Description,
                         Status = t.Status,
                         Priority = t.Priority,
-                        ReporterId = t.ReporterId,
-                        ReporterName = t.Reporter.Name,
+                        CreatorId = t.CreatorId,
+                        ProjectId = t.ProjectId,
+                        ParentTaskId = t.ParentTaskId,
+                        CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
@@ -123,11 +128,12 @@ namespace TaskManagement.Controllers
                     Title = dto.Title,
                     Description = dto.Description,
                     Priority = dto.Priority,
+                    StartDate = dto.StartDate,
                     DueDate = dto.DueDate,
                     StoryPoints = dto.StoryPoints,
                     ProjectId = dto.ProjectId,
                     ParentTaskId = dto.ParentTaskId,
-                    ReporterId = creatorId,
+                    CreatorId = creatorId,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -234,6 +240,11 @@ namespace TaskManagement.Controllers
                 {
                     changes.Add($"Priority: {task.Priority} → {dto.Priority}");
                     task.Priority = dto.Priority;
+                }
+                if (dto.StartDate != null && dto.StartDate != task.StartDate)
+                {
+                    changes.Add($"StartDate: {task.StartDate} → {dto.StartDate}");
+                    task.StartDate = dto.StartDate;
                 }
                 if (dto.DueDate != null && dto.DueDate != task.DueDate)
                 {
@@ -441,8 +452,8 @@ namespace TaskManagement.Controllers
                         Description = t.Description,
                         Status = t.Status,
                         Priority = t.Priority,
-                        ReporterId = t.ReporterId,
-                        ReporterName = t.Reporter.Name,
+                        CreatorId = t.CreatorId,
+                        CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
                         ProjectId = t.ProjectId,
                         ParentTaskId = t.ParentTaskId,
@@ -486,9 +497,11 @@ namespace TaskManagement.Controllers
                             Description = t.Description,
                             Status = t.Status,
                             Priority = t.Priority,
-                            ReporterId = t.ReporterId,
-                            ReporterName = t.Reporter.Name,
+                            CreatorId = t.CreatorId,
+                            CreatorName = t.Creator.Name,
                             StoryPoints = t.StoryPoints,
+                            ProjectId = t.ProjectId,
+                            ParentTaskId = t.ParentTaskId,
                             DueDate = t.DueDate,
                             CreatedAt = t.CreatedAt,
                             UpdatedAt = t.UpdatedAt,
@@ -519,9 +532,11 @@ namespace TaskManagement.Controllers
                             Description = t.Description,
                             Status = t.Status,
                             Priority = t.Priority,
-                            ReporterId = t.ReporterId,
-                            ReporterName = t.Reporter.Name,
+                            CreatorId = t.CreatorId,
+                            CreatorName = t.Creator.Name,
                             StoryPoints = t.StoryPoints,
+                            ProjectId = t.ProjectId,
+                            ParentTaskId = t.ParentTaskId,
                             DueDate = t.DueDate,
                             CreatedAt = t.CreatedAt,
                             UpdatedAt = t.UpdatedAt,
@@ -542,9 +557,11 @@ namespace TaskManagement.Controllers
                         Description = t.Description,
                         Status = t.Status,
                         Priority = t.Priority,
-                        ReporterId = t.ReporterId,
-                        ReporterName = t.Reporter.Name,
+                        CreatorId = t.CreatorId,
+                        CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
+                        ProjectId = t.ProjectId,
+                        ParentTaskId = t.ParentTaskId,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
