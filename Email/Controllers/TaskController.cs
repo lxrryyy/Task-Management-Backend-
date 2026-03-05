@@ -17,6 +17,55 @@ namespace TaskManagement.Controllers
             _context = context;
         }
 
+
+        [HttpGet("GetAllTasksPriorities")]
+        public async Task<IActionResult> GetAllTasksPriorities()
+        {
+            try
+            {
+                var priorities = await _context.TaskPriorities
+                    .Where(t => t.IsActive)
+                    .Select(t => new
+                    {
+                        Id = t.Id,
+                        Name = t.Name,
+                        Description = t.Description,
+                        Active = t.IsActive,
+                        CreatedAt = t.CreatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(priorities);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+        [HttpGet("GetAllTasksStatuses")]
+        public async Task<IActionResult> GetAllTasksStatuses()
+        {
+            try
+            {
+                var statuses = await _context.TaskStatuses
+                    .Where(t => t.IsActive)
+                    .Select(t => new
+                    {
+                        Id = t.Id,
+                        Name = t.Name,
+                        Description = t.Description,
+                        Active = t.IsActive,
+                        CreatedAt = t.CreatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(statuses);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
         // GET all tasks
         [HttpGet("GetAllTasks")]
         public async Task<IActionResult> GetAllTasks()

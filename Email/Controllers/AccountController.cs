@@ -90,13 +90,13 @@ namespace TaskManagement.Controllers
             if (newAccount is null)
                 return BadRequest();
 
-            // validation ng email
-            var allowedDomains = _config.GetSection("AllowedEmailDomains").Get<List<string>>()
-                     ?? new List<string>();
-
-            if (!allowedDomains.Any(domain =>
-                newAccount.Email.EndsWith(domain, StringComparison.OrdinalIgnoreCase)))
-                return BadRequest($"Email must be from an allowed domain: {string.Join(", ", allowedDomains)}");
+            if (!System.Text.RegularExpressions.Regex.IsMatch(
+                newAccount.Email,
+                @"^[^@\s]+@[^@\s]+\.com$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                return BadRequest("Email must follow the format example@domain.com.");
+            }
 
             // Validate password requirements
             var password = newAccount.PasswordHash;

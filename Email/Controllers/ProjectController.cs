@@ -29,7 +29,30 @@ namespace TaskManagement.Controllers
             var completed = rootTasks.Count(t => t.StatusId == 4); // 4 = Completed
             return (int)Math.Round((double)completed / rootTasks.Count * 100);
         }
+        [HttpGet("GetAllProjectsStatus")]
+        public async Task<IActionResult> GetAllProjectStatuses()
+        {
+            try
+            {
+                var statuses = await _context.ProjectStatuses
+                    .Where(t => t.IsActive)
+                    .Select(t => new
+                    {
+                        Id = t.Id,
+                        Name = t.Name,
+                        Description = t.Description,
+                        Active = t.IsActive,
+                        CreatedAt = t.CreatedAt
+                    })
+                    .ToListAsync();
 
+                return Ok(statuses);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
         // GET projects created by user
         [HttpGet("GetProjectsCreatedByMe/{accountId}")]
         public async Task<IActionResult> GetProjectsCreatedByMe(int accountId)
@@ -109,15 +132,17 @@ namespace TaskManagement.Controllers
                 {
                     if (dto.ProjectManagerId == null)
                         return BadRequest("Admin must select a Project Manager.");
+
                     projectManagerId = dto.ProjectManagerId.Value;
-                    scrumMasterId = dto.ScrumMasterId;
+                    scrumMasterId = dto.ScrumMasterId;  
                 }
-                else
+                else // User role
                 {
                     projectManagerId = creatorId;
-                    if (dto.IsAlsoScrumMaster)
-                        scrumMasterId = creatorId;
-                    else
+                    scrumMasterId = creatorId; // User is always both PM and SM
+
+                    // If they explicitly assigned someone else as SM, override it
+                    if (!dto.IsAlsoScrumMaster && dto.ScrumMasterId != null && dto.ScrumMasterId != creatorId)
                         scrumMasterId = dto.ScrumMasterId;
                 }
 
@@ -139,16 +164,18 @@ namespace TaskManagement.Controllers
                 _context.Projects.Add(project);
                 await _context.SaveChangesAsync();
 
-                // Add Project Manager as member
+                var pmRole = (scrumMasterId != null && scrumMasterId == projectManagerId)
+                    ? "ProjectManager-ScrumMaster"
+                    : "ProjectManager";
+
                 _context.ProjectMembers.Add(new ProjectMember
                 {
                     ProjectId = project.Id,
                     AccountId = projectManagerId,
-                    Role = "ProjectManager",
+                    Role = pmRole,
                     JoinedAt = DateTime.UtcNow
                 });
 
-                // Add Scrum Master as member if different from PM
                 if (scrumMasterId != null && scrumMasterId != projectManagerId)
                 {
                     _context.ProjectMembers.Add(new ProjectMember
@@ -158,13 +185,6 @@ namespace TaskManagement.Controllers
                         Role = "ScrumMaster",
                         JoinedAt = DateTime.UtcNow
                     });
-                }
-                else if (scrumMasterId != null && scrumMasterId == projectManagerId)
-                {
-                    var pmMember = await _context.ProjectMembers
-                        .FirstOrDefaultAsync(m => m.ProjectId == project.Id && m.AccountId == projectManagerId);
-                    if (pmMember != null)
-                        pmMember.Role = "ProjectManager-ScrumMaster";
                 }
 
                 if (dto.MemberIds.Distinct().Count() != dto.MemberIds.Count)
@@ -305,22 +325,33 @@ namespace TaskManagement.Controllers
                     project.ProjectManagerId = dto.ProjectManagerId.Value;
                 }
 
-                // Update Scrum Master
                 if (dto.ScrumMasterId != project.ScrumMasterId)
                 {
                     if (project.ScrumMasterId.HasValue)
                     {
                         var oldSm = await _context.ProjectMembers
                             .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == project.ScrumMasterId);
-                        if (oldSm != null && oldSm.Role == "ScrumMaster")
-                            _context.ProjectMembers.Remove(oldSm);
+
+                        if (oldSm != null)
+                        {
+                            if (oldSm.Role == "ScrumMaster")
+                                _context.ProjectMembers.Remove(oldSm);
+                            else if (oldSm.Role == "ProjectManager-ScrumMaster")
+                                oldSm.Role = "ProjectManager"; // demote of role
+                        }
                     }
 
                     if (dto.ScrumMasterId.HasValue)
                     {
-                        var newSmExists = await _context.ProjectMembers
-                            .AnyAsync(m => m.ProjectId == projectId && m.AccountId == dto.ScrumMasterId.Value);
-                        if (!newSmExists)
+                        var newSm = await _context.ProjectMembers
+                            .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == dto.ScrumMasterId.Value);
+
+                        if (newSm != null)
+                        {
+                            if (newSm.Role == "ProjectManager")
+                                newSm.Role = "ProjectManager-ScrumMaster";
+                        }
+                        else
                         {
                             _context.ProjectMembers.Add(new ProjectMember
                             {
