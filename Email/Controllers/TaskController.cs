@@ -92,7 +92,7 @@ namespace TaskManagement.Controllers
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
-                        AssigneeIds = t.Assignments.Select(a => a.AccountId).ToList()
+                        AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
                     })
                     .ToListAsync();
 
@@ -130,7 +130,7 @@ namespace TaskManagement.Controllers
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
-                        AssigneeIds = t.Assignments.Select(a => a.AccountId).ToList()
+                        AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
                     })
                     .FirstOrDefaultAsync();
 
@@ -158,7 +158,7 @@ namespace TaskManagement.Controllers
                 if (creator.Role != "Admin")
                 {
                     var projectMember = await _context.ProjectMembers
-                        .FirstOrDefaultAsync(m => m.ProjectId == dto.ProjectId && m.AccountId == creatorId);
+                        .FirstOrDefaultAsync(m => m.ProjectId == dto.ProjectId && m.AccountId == creatorId && !m.IsDeleted);
 
                     if (projectMember == null)
                         return StatusCode(403, "You are not a member of this project.");
@@ -380,7 +380,7 @@ namespace TaskManagement.Controllers
                     return NotFound("Task not found.");
 
                 var isAssigned = await _context.TaskAssignments
-                    .AnyAsync(a => a.TaskId == id && a.AccountId == requesterId);
+                    .AnyAsync(a => a.TaskId == id && a.AccountId == requesterId && !a.IsDeleted);
 
                 var requester = await _context.Accounts.FindAsync(requesterId);
                 if (requester == null)
@@ -427,7 +427,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // DELETE task (soft delete)
         [HttpDelete("DeleteTask/{id}")]
         public async Task<IActionResult> DeleteTask(int id, [FromQuery] int deleterId)
         {
@@ -439,6 +438,36 @@ namespace TaskManagement.Controllers
 
                 task.IsDeleted = true;
                 task.UpdatedAt = DateTime.UtcNow;
+
+                var subtasks = await _context.Tasks
+                    .Where(t => t.ParentTaskId == id && !t.IsDeleted)
+                    .ToListAsync();
+
+                foreach (var subtask in subtasks)
+                {
+                    subtask.IsDeleted = true;
+                    subtask.UpdatedAt = DateTime.UtcNow;
+
+                    var subtaskAssignments = await _context.TaskAssignments
+                        .Where(a => a.TaskId == subtask.Id && !a.IsDeleted)
+                        .ToListAsync();
+
+                    foreach (var assignment in subtaskAssignments)
+                    {
+                        assignment.IsDeleted = true;
+                        assignment.DeletedAt = DateTime.UtcNow;
+                    }
+                }
+
+                var taskAssignments = await _context.TaskAssignments
+                    .Where(a => a.TaskId == id && !a.IsDeleted)
+                    .ToListAsync();
+
+                foreach (var assignment in taskAssignments)
+                {
+                    assignment.IsDeleted = true;
+                    assignment.DeletedAt = DateTime.UtcNow;
+                }
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -485,8 +514,15 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can assign tasks.");
                 }
 
-                var existing = _context.TaskAssignments.Where(a => a.TaskId == id);
-                _context.TaskAssignments.RemoveRange(existing);
+                var existing = await _context.TaskAssignments
+                    .Where(a => a.TaskId == id && !a.IsDeleted)
+                    .ToListAsync();
+
+                foreach (var a in existing)
+                {
+                    a.IsDeleted = true;
+                    a.DeletedAt = DateTime.UtcNow;
+                }
 
                 foreach (var accountId in dto.AssigneeIds)
                 {
@@ -526,7 +562,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var tasks = await _context.Tasks
-                    .Where(t => !t.IsDeleted && t.Assignments.Any(a => a.AccountId == accountId))
+                    .Where(t => !t.IsDeleted && t.Assignments.Any(a => a.AccountId == accountId && !a.IsDeleted))
                     .Select(t => new TaskResponseDTO
                     {
                         Id = t.Id,
@@ -545,7 +581,7 @@ namespace TaskManagement.Controllers
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
-                        AssigneeIds = t.Assignments.Select(a => a.AccountId).ToList()
+                        AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
                     })
                     .ToListAsync();
 
@@ -586,7 +622,7 @@ namespace TaskManagement.Controllers
                                        projectMember.Role == "ProjectManager-ScrumMaster";
 
                     if (!isPrivileged)
-                        query = query.Where(t => t.Assignments.Any(a => a.AccountId == requesterId));
+                        query = query.Where(t => t.Assignments.Any(a => a.AccountId == requesterId && !a.IsDeleted));
                 }
 
                 var tasks = await query
@@ -608,7 +644,7 @@ namespace TaskManagement.Controllers
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
-                        AssigneeIds = t.Assignments.Select(a => a.AccountId).ToList()
+                        AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
                     })
                     .ToListAsync();
 

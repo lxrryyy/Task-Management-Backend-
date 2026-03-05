@@ -193,7 +193,7 @@ namespace TaskManagement.Controllers
                 foreach (var memberId in dto.MemberIds.Distinct())
                 {
                     var alreadyAdded = await _context.ProjectMembers
-                        .AnyAsync(m => m.ProjectId == project.Id && m.AccountId == memberId);
+                        .AnyAsync(m => m.ProjectId == project.Id && m.AccountId == memberId && !m.IsDeleted);
 
                     if (!alreadyAdded)
                     {
@@ -219,7 +219,7 @@ namespace TaskManagement.Controllers
                 await _context.SaveChangesAsync();
 
                 var memberNames = await _context.ProjectMembers
-                    .Where(pm => pm.ProjectId == project.Id)
+                    .Where(pm => pm.ProjectId == project.Id && !pm.IsDeleted)
                     .Select(pm => pm.Account.Name)
                     .ToListAsync();
 
@@ -303,13 +303,17 @@ namespace TaskManagement.Controllers
                 // Only Admin can update Project Manager
                 if (isAdmin && dto.ProjectManagerId.HasValue && dto.ProjectManagerId != project.ProjectManagerId)
                 {
-                    var oldPm = await _context.ProjectMembers
-                        .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == project.ProjectManagerId);
+                    var oldPm = await _context.ProjectMembers.FirstOrDefaultAsync(
+                        m => m.ProjectId == projectId && m.AccountId == project.ProjectManagerId && !m.IsDeleted);
+
                     if (oldPm != null)
-                        _context.ProjectMembers.Remove(oldPm);
+                    {
+                        oldPm.IsDeleted = true;
+                        oldPm.DeletedAt = DateTime.UtcNow;
+                    }
 
                     var newPmExists = await _context.ProjectMembers
-                        .AnyAsync(m => m.ProjectId == projectId && m.AccountId == dto.ProjectManagerId.Value);
+                        .AnyAsync(m => m.ProjectId == projectId && m.AccountId == dto.ProjectManagerId.Value && !m.IsDeleted);
                     if (!newPmExists)
                     {
                         _context.ProjectMembers.Add(new ProjectMember
@@ -330,21 +334,25 @@ namespace TaskManagement.Controllers
                     if (project.ScrumMasterId.HasValue)
                     {
                         var oldSm = await _context.ProjectMembers
-                            .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == project.ScrumMasterId);
+                            .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == project.ScrumMasterId && !m.IsDeleted);
 
                         if (oldSm != null)
                         {
                             if (oldSm.Role == "ScrumMaster")
-                                _context.ProjectMembers.Remove(oldSm);
+                            {
+                                // Soft delete instead of removing
+                                oldSm.IsDeleted = true;
+                                oldSm.DeletedAt = DateTime.UtcNow;
+                            }
                             else if (oldSm.Role == "ProjectManager-ScrumMaster")
-                                oldSm.Role = "ProjectManager"; // demote of role
+                                oldSm.Role = "ProjectManager";
                         }
                     }
 
                     if (dto.ScrumMasterId.HasValue)
                     {
                         var newSm = await _context.ProjectMembers
-                            .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == dto.ScrumMasterId.Value);
+                            .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == dto.ScrumMasterId.Value && !m.IsDeleted);
 
                         if (newSm != null)
                         {
@@ -374,18 +382,23 @@ namespace TaskManagement.Controllers
                         return BadRequest("Duplicate assignee IDs are not allowed.");
 
                     var existingMembers = await _context.ProjectMembers
-                        .Where(m => m.ProjectId == projectId && m.Role == "Member")
-                        .ToListAsync();
+                    .Where(m => m.ProjectId == projectId && m.Role == "Member" && !m.IsDeleted)
+                    .ToListAsync();
 
                     var toRemove = existingMembers
-                        .Where(m => !dto.AssigneeIds.Contains(m.AccountId))
-                        .ToList();
-                    _context.ProjectMembers.RemoveRange(toRemove);
+                    .Where(m => !dto.AssigneeIds.Contains(m.AccountId))
+                    .ToList();
+
+                    foreach (var m in toRemove)
+                    {
+                        m.IsDeleted = true;
+                        m.DeletedAt = DateTime.UtcNow;
+                    }
 
                     foreach (var memberId in dto.AssigneeIds.Distinct())
                     {
                         var alreadyExists = await _context.ProjectMembers
-                            .AnyAsync(m => m.ProjectId == projectId && m.AccountId == memberId);
+                       .AnyAsync(m => m.ProjectId == projectId && m.AccountId == memberId && !m.IsDeleted);
 
                         if (!alreadyExists)
                         {
@@ -586,7 +599,7 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // DELETE project (soft delete, admin only)
+        //DELETION PROJECTS
         [HttpDelete("DeleteProject/{id}")]
         public async Task<IActionResult> DeleteProject(int id, [FromQuery] int adminId)
         {
@@ -602,6 +615,16 @@ namespace TaskManagement.Controllers
 
                 project.IsDeleted = true;
                 project.UpdatedAt = DateTime.UtcNow;
+
+                var members = await _context.ProjectMembers
+                    .Where(m => m.ProjectId == id && !m.IsDeleted)
+                    .ToListAsync();
+
+                foreach (var member in members)
+                {
+                    member.IsDeleted = true;
+                    member.DeletedAt = DateTime.UtcNow;
+                }
 
                 _context.TimeLogs.Add(new TimeLog
                 {

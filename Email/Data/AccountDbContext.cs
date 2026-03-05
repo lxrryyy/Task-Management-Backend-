@@ -30,7 +30,7 @@ namespace TaskManagement.Data
 
             // Task relationships
             modelBuilder.Entity<TaskAssignment>()
-                .HasOne<TaskItem>()
+                .HasOne<TaskItem>(a => a.Task)
                 .WithMany(t => t.Assignments)
                 .HasForeignKey(a => a.TaskId)
                 .OnDelete(DeleteBehavior.Cascade);
