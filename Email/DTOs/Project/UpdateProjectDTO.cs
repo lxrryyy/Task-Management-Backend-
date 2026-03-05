@@ -4,7 +4,7 @@
     {
         public string? Name { get; set; }
         public string? Description { get; set; }
-        public string? Status { get; set; } // Active, OnHold, Completed, Cancelled
+        public int? StatusId { get; set; } // 1 Not Started, 2 Active, 3 Completed
         public int? ProjectManagerId { get; set; }
         public int? ScrumMasterId { get; set; }
         public List<int>? AssigneeIds { get; set; }

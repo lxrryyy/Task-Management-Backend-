@@ -20,7 +20,9 @@ namespace TaskManagement.Data
         // Project Management
         public DbSet<Project> Projects { get; set; }            
         public DbSet<ProjectMember> ProjectMembers { get; set; }
-       
+        public DbSet<TaskItemStatus> TaskStatuses { get; set; }
+        public DbSet<TaskPriority> TaskPriorities { get; set; }
+        public DbSet<ProjectStatus> ProjectStatuses { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -83,6 +85,50 @@ namespace TaskManagement.Data
                 .WithMany()
                 .HasForeignKey(nameof(Project.ScrumMasterId))
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // TaskItem - TaskStatus 
+            modelBuilder.Entity<TaskItem>()
+                .HasOne(t => t.Status)
+                .WithMany()
+                .HasForeignKey(t => t.StatusId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // TaskItem - TaskPriority 
+            modelBuilder.Entity<TaskItem>()
+                .HasOne(t => t.Priority)
+                .WithMany()
+                .HasForeignKey(t => t.PriorityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Project - ProjectStatus 
+            modelBuilder.Entity<Project>()
+                .HasOne(p => p.Status)
+                .WithMany()
+                .HasForeignKey(p => p.StatusId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            //  TaskStatus 
+            modelBuilder.Entity<TaskItemStatus>().HasData(
+                new TaskItemStatus { Id = 1, Name = "Not Started", CreatedAt = new DateTime(2026, 1, 1) },
+                new TaskItemStatus { Id = 2, Name = "In Progress", CreatedAt = new DateTime(2026, 1, 1) },
+                new TaskItemStatus { Id = 3, Name = "For Review", CreatedAt = new DateTime(2026, 1, 1) },
+                new TaskItemStatus { Id = 4, Name = "Completed", CreatedAt = new DateTime(2026, 1, 1) }
+            );
+
+            //  TaskPriority 
+            modelBuilder.Entity<TaskPriority>().HasData(
+                new TaskPriority { Id = 1, Name = "Urgent", CreatedAt = new DateTime(2026, 1, 1) },
+                new TaskPriority { Id = 2, Name = "Important", CreatedAt = new DateTime(2026, 1, 1) },
+                new TaskPriority { Id = 3, Name = "Medium", CreatedAt = new DateTime(2026, 1, 1) },
+                new TaskPriority { Id = 4, Name = "Low", CreatedAt = new DateTime(2026, 1, 1) }
+            );
+
+            // ProjectStatus 
+            modelBuilder.Entity<ProjectStatus>().HasData(
+                new ProjectStatus { Id = 1, Name = "Not Started", CreatedAt = new DateTime(2026, 1, 1) },
+                new ProjectStatus { Id = 2, Name = "Active", CreatedAt = new DateTime(2026, 1, 1) },
+                new ProjectStatus { Id = 3, Name = "Completed", CreatedAt = new DateTime(2026, 1, 1) }
+            );
 
         }
     }

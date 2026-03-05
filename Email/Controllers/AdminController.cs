@@ -24,13 +24,21 @@ namespace TaskManagement.Controllers
         {
             try
             {
-                var task = await _context.Tasks.FindAsync(taskId);
+                var admin = await _context.Accounts.FindAsync(adminId);
+                if (admin == null || admin.Role != "Admin")
+                    return StatusCode(403, "Access denied. Admins only.");
 
+                var task = await _context.Tasks.FindAsync(taskId);
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                var oldStatus = task.Status;
-                task.Status = dto.Status;
+                // Validate StatusId
+                var statusExists = await _context.TaskStatuses.AnyAsync(s => s.Id == dto.StatusId);
+                if (!statusExists)
+                    return BadRequest("Invalid StatusId.");
+
+                var oldStatusId = task.StatusId;
+                task.StatusId = dto.StatusId; 
                 task.UpdatedAt = DateTime.UtcNow;
 
                 _context.TimeLogs.Add(new TimeLog
@@ -38,8 +46,8 @@ namespace TaskManagement.Controllers
                     TaskId = taskId,
                     AccountId = adminId,
                     Action = "StatusChanged",
-                    OldValue = oldStatus,
-                    NewValue = dto.Status,
+                    OldValue = oldStatusId.ToString(),
+                    NewValue = dto.StatusId.ToString(),
                     Note = dto.Note ?? "Force updated by admin"
                 });
 
@@ -54,17 +62,25 @@ namespace TaskManagement.Controllers
 
         // Change task priority
         [HttpPatch("ChangePriority/{taskId}")]
-        public async Task<IActionResult> ChangePriority(int taskId, [FromQuery] string priority, [FromQuery] int adminId)
+        public async Task<IActionResult> ChangePriority(int taskId, [FromQuery] int priorityId, [FromQuery] int adminId)
         {
             try
             {
-                var task = await _context.Tasks.FindAsync(taskId);
+                var admin = await _context.Accounts.FindAsync(adminId);
+                if (admin == null || admin.Role != "Admin")
+                    return StatusCode(403, "Access denied. Admins only.");
 
+                var task = await _context.Tasks.FindAsync(taskId);
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                var oldPriority = task.Priority;
-                task.Priority = priority;
+                // Validate PriorityId
+                var priorityExists = await _context.TaskPriorities.AnyAsync(p => p.Id == priorityId);
+                if (!priorityExists)
+                    return BadRequest("Invalid PriorityId.");
+
+                var oldPriorityId = task.PriorityId;
+                task.PriorityId = priorityId; // 👈
                 task.UpdatedAt = DateTime.UtcNow;
 
                 _context.TimeLogs.Add(new TimeLog
@@ -72,8 +88,8 @@ namespace TaskManagement.Controllers
                     TaskId = taskId,
                     AccountId = adminId,
                     Action = "PriorityChanged",
-                    OldValue = oldPriority,
-                    NewValue = priority,
+                    OldValue = oldPriorityId.ToString(),
+                    NewValue = priorityId.ToString(),
                     Note = "Priority changed by admin"
                 });
 
@@ -92,8 +108,11 @@ namespace TaskManagement.Controllers
         {
             try
             {
-                var task = await _context.Tasks.FindAsync(taskId);
+                var admin = await _context.Accounts.FindAsync(adminId);
+                if (admin == null || admin.Role != "Admin")
+                    return StatusCode(403, "Access denied. Admins only.");
 
+                var task = await _context.Tasks.FindAsync(taskId);
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
@@ -126,22 +145,22 @@ namespace TaskManagement.Controllers
         {
             try
             {
-                var task = await _context.Tasks.FindAsync(taskId);
+                var admin = await _context.Accounts.FindAsync(adminId);
+                if (admin == null || admin.Role != "Admin")
+                    return StatusCode(403, "Access denied. Admins only.");
 
+                var task = await _context.Tasks.FindAsync(taskId);
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                // Get old assignees for logging
                 var oldAssignees = await _context.TaskAssignments
                     .Where(a => a.TaskId == taskId)
                     .Select(a => a.AccountId)
                     .ToListAsync();
 
-                // Remove existing
                 var existing = _context.TaskAssignments.Where(a => a.TaskId == taskId);
                 _context.TaskAssignments.RemoveRange(existing);
 
-                // Add new
                 foreach (var accountId in dto.AssigneeIds)
                 {
                     _context.TaskAssignments.Add(new TaskAssignment
@@ -180,6 +199,10 @@ namespace TaskManagement.Controllers
         {
             try
             {
+                var admin = await _context.Accounts.FindAsync(adminId);
+                if (admin == null || admin.Role != "Admin")
+                    return StatusCode(403, "Access denied. Admins only.");
+
                 var existing = await _context.TaskPermissions
                     .SingleOrDefaultAsync(p => p.TaskId == dto.TaskId && p.AccountId == dto.AccountId);
 
@@ -223,7 +246,7 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // Get task visibility
+        // Get task permissions
         [HttpGet("GetTaskPermissions/{taskId}")]
         public async Task<IActionResult> GetTaskPermissions(int taskId)
         {

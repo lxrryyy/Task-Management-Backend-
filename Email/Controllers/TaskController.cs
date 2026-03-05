@@ -1,6 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.ComponentModel.DataAnnotations;
 using TaskManagement.Data;
 using TaskManagement.DTOs.Task;
 using TaskManagement.Models;
@@ -31,12 +30,15 @@ namespace TaskManagement.Controllers
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        Status = t.Status,
-                        Priority = t.Priority,
+                        StatusId = t.StatusId,           
+                        StatusName = t.Status.Name,      
+                        PriorityId = t.PriorityId,       
+                        PriorityName = t.Priority.Name,  
                         ParentTaskId = t.ParentTaskId,
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
+                        ProjectId = t.ProjectId,
                         StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
@@ -66,8 +68,10 @@ namespace TaskManagement.Controllers
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        Status = t.Status,
-                        Priority = t.Priority,
+                        StatusId = t.StatusId,           
+                        StatusName = t.Status.Name,      
+                        PriorityId = t.PriorityId,       
+                        PriorityName = t.Priority.Name,  
                         CreatorId = t.CreatorId,
                         ProjectId = t.ProjectId,
                         ParentTaskId = t.ParentTaskId,
@@ -111,23 +115,32 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "You are not a member of this project.");
 
                     var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
-
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can create tasks.");
                 }
-                // story points
+
+                // Validate story points
                 if (dto.StoryPoints.HasValue && (dto.StoryPoints < 1 || dto.StoryPoints > 5))
                     return BadRequest("Story points must be between 1 and 5.");
 
-                //  duplicate assigneeIds 
+                // Validate duplicate assigneeIds
                 if (dto.AssigneeIds.Distinct().Count() != dto.AssigneeIds.Count)
                     return BadRequest("Duplicate assignee IDs are not allowed.");
+
+                // Validate PriorityId if provided
+                if (dto.PriorityId.HasValue)
+                {
+                    var priorityExists = await _context.TaskPriorities.AnyAsync(p => p.Id == dto.PriorityId.Value);
+                    if (!priorityExists)
+                        return BadRequest("Invalid PriorityId.");
+                }
 
                 var task = new TaskItem
                 {
                     Title = dto.Title,
                     Description = dto.Description,
-                    Priority = dto.Priority,
+                    PriorityId = dto.PriorityId, 
+                    StatusId = 1,                  
                     StartDate = dto.StartDate,
                     DueDate = dto.DueDate,
                     StoryPoints = dto.StoryPoints,
@@ -141,15 +154,25 @@ namespace TaskManagement.Controllers
                 _context.Tasks.Add(task);
                 await _context.SaveChangesAsync();
 
-                
+                // Auto set project status to Active (StatusId = 2)
                 var project = await _context.Projects.FindAsync(dto.ProjectId);
-                if (project != null && project.Status == "Not Started")
+                if (project != null && project.StatusId == 1) // 1 = Not Started
                 {
-                    project.Status = "InProgress";
+                    project.StatusId = 2; // 2 = Active
                     project.UpdatedAt = DateTime.UtcNow;
+
+                    _context.TimeLogs.Add(new TimeLog
+                    {
+                        TaskId = null,
+                        AccountId = creatorId,
+                        Action = "ProjectStatusChanged",
+                        OldValue = "Not Started",
+                        NewValue = "Active",
+                        Note = "Project set to Active because a task was created"
+                    });
                 }
-                
-                // assign users 
+
+                // Assign users
                 if (dto.AssigneeIds.Any())
                 {
                     foreach (var accountId in dto.AssigneeIds)
@@ -165,14 +188,16 @@ namespace TaskManagement.Controllers
                     await _context.SaveChangesAsync();
                 }
 
-                // time logs
+                // Time log
                 _context.TimeLogs.Add(new TimeLog
                 {
                     TaskId = task.Id,
                     AccountId = creatorId,
                     Action = "Created",
                     NewValue = task.Title,
-                    Note = dto.ParentTaskId == null ? "Task created" : "Subtask created"
+                    Note = dto.ParentTaskId == null
+                        ? $"Task created by {creator.Name} ({creator.Role})"
+                        : $"Subtask created by {creator.Name} ({creator.Role})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -192,11 +217,9 @@ namespace TaskManagement.Controllers
             try
             {
                 var task = await _context.Tasks.FindAsync(id);
-
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                // Role-based authorization
                 var updater = await _context.Accounts.FindAsync(updaterId);
                 if (updater == null)
                     return NotFound("Updater account not found.");
@@ -210,12 +233,11 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "You are not a member of this project.");
 
                     var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
-
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can update tasks.");
                 }
 
-                // Story points validation
+                // Validate story points
                 if (dto.StoryPoints.HasValue && (dto.StoryPoints < 1 || dto.StoryPoints > 5))
                     return BadRequest("Story points must be between 1 and 5.");
 
@@ -231,16 +253,28 @@ namespace TaskManagement.Controllers
                     changes.Add($"Description updated");
                     task.Description = dto.Description;
                 }
-                if (dto.Status != null && dto.Status != task.Status)
+
+                if (dto.StatusId.HasValue && dto.StatusId != task.StatusId)
                 {
-                    changes.Add($"Status: {task.Status} → {dto.Status}");
-                    task.Status = dto.Status;
+                    var statusExists = await _context.TaskStatuses.AnyAsync(s => s.Id == dto.StatusId.Value);
+                    if (!statusExists)
+                        return BadRequest("Invalid StatusId.");
+
+                    changes.Add($"StatusId: {task.StatusId} → {dto.StatusId}");
+                    task.StatusId = dto.StatusId.Value;
                 }
-                if (dto.Priority != null && dto.Priority != task.Priority)
+
+              
+                if (dto.PriorityId.HasValue && dto.PriorityId != task.PriorityId)
                 {
-                    changes.Add($"Priority: {task.Priority} → {dto.Priority}");
-                    task.Priority = dto.Priority;
+                    var priorityExists = await _context.TaskPriorities.AnyAsync(p => p.Id == dto.PriorityId.Value);
+                    if (!priorityExists)
+                        return BadRequest("Invalid PriorityId.");
+
+                    changes.Add($"PriorityId: {task.PriorityId} → {dto.PriorityId}");
+                    task.PriorityId = dto.PriorityId;
                 }
+
                 if (dto.StartDate != null && dto.StartDate != task.StartDate)
                 {
                     changes.Add($"StartDate: {task.StartDate} → {dto.StartDate}");
@@ -255,6 +289,11 @@ namespace TaskManagement.Controllers
                 {
                     changes.Add($"StoryPoints: {task.StoryPoints} → {dto.StoryPoints}");
                     task.StoryPoints = dto.StoryPoints;
+                }
+                if (dto.ParentTaskId != task.ParentTaskId)
+                {
+                    changes.Add($"ParentTaskId: {task.ParentTaskId} → {dto.ParentTaskId}");
+                    task.ParentTaskId = dto.ParentTaskId;
                 }
 
                 task.UpdatedAt = DateTime.UtcNow;
@@ -280,6 +319,7 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
         // PATCH update task status (for assigned members)
         [HttpPatch("UpdateTaskStatus/{id}")]
         public async Task<IActionResult> UpdateTaskStatus(int id, [FromQuery] int requesterId, [FromBody] UpdateTaskStatusDTO dto)
@@ -290,7 +330,6 @@ namespace TaskManagement.Controllers
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                // Check if requester is assigned to this task
                 var isAssigned = await _context.TaskAssignments
                     .AnyAsync(a => a.TaskId == id && a.AccountId == requesterId);
 
@@ -298,8 +337,6 @@ namespace TaskManagement.Controllers
                 if (requester == null)
                     return NotFound("Account not found.");
 
-                // Admin, PM, Scrum can update any task status
-                // Regular member can only update if assigned
                 if (requester.Role != "Admin")
                 {
                     var projectMember = await _context.ProjectMembers
@@ -313,8 +350,13 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "You are not assigned to this task.");
                 }
 
-                var oldStatus = task.Status;
-                task.Status = dto.Status;
+                // Validate StatusId
+                var statusExists = await _context.TaskStatuses.AnyAsync(s => s.Id == dto.StatusId);
+                if (!statusExists)
+                    return BadRequest("Invalid StatusId.");
+
+                var oldStatusId = task.StatusId;
+                task.StatusId = dto.StatusId; 
                 task.UpdatedAt = DateTime.UtcNow;
 
                 _context.TimeLogs.Add(new TimeLog
@@ -322,9 +364,9 @@ namespace TaskManagement.Controllers
                     TaskId = task.Id,
                     AccountId = requesterId,
                     Action = "StatusUpdated",
-                    OldValue = oldStatus,
-                    NewValue = dto.Status,
-                    Note = $"Status changed from {oldStatus} to {dto.Status}"
+                    OldValue = oldStatusId.ToString(),
+                    NewValue = dto.StatusId.ToString(),
+                    Note = $"Status changed from {oldStatusId} to {dto.StatusId}"
                 });
 
                 await _context.SaveChangesAsync();
@@ -336,7 +378,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-
         // DELETE task (soft delete)
         [HttpDelete("DeleteTask/{id}")]
         public async Task<IActionResult> DeleteTask(int id, [FromQuery] int deleterId)
@@ -344,7 +385,6 @@ namespace TaskManagement.Controllers
             try
             {
                 var task = await _context.Tasks.FindAsync(id);
-
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
@@ -368,6 +408,7 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
         // PATCH assign task
         [HttpPatch("AssignTask/{id}")]
         public async Task<IActionResult> AssignTask(int id, [FromBody] AssignTaskDTO dto)
@@ -378,17 +419,12 @@ namespace TaskManagement.Controllers
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                // Role-based authorization
                 var assigner = await _context.Accounts.FindAsync(dto.AssignedById);
                 if (assigner == null)
                     return NotFound("Assigner account not found.");
 
-
                 if (assigner.Role != "Admin")
                 {
-                    if (task.ProjectId == null)
-                        return StatusCode(403, "Task is not associated with any project.");
-
                     var projectMember = await _context.ProjectMembers
                         .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById);
 
@@ -396,16 +432,13 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "You are not a member of this project.");
 
                     var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
-
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can assign tasks.");
                 }
 
-                // Remove existing assignments
                 var existing = _context.TaskAssignments.Where(a => a.TaskId == id);
                 _context.TaskAssignments.RemoveRange(existing);
 
-                // Add new assignments
                 foreach (var accountId in dto.AssigneeIds)
                 {
                     _context.TaskAssignments.Add(new TaskAssignment
@@ -437,26 +470,29 @@ namespace TaskManagement.Controllers
             }
         }
 
+        // GET tasks by assignee
         [HttpGet("GetTasksByAssignee/{accountId}")]
         public async Task<IActionResult> GetTasksByAssignee(int accountId)
         {
             try
             {
                 var tasks = await _context.Tasks
-                    .Where(t => !t.IsDeleted &&
-                           t.Assignments.Any(a => a.AccountId == accountId))
+                    .Where(t => !t.IsDeleted && t.Assignments.Any(a => a.AccountId == accountId))
                     .Select(t => new TaskResponseDTO
                     {
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        Status = t.Status,
-                        Priority = t.Priority,
+                        StatusId = t.StatusId,           
+                        StatusName = t.Status.Name,      
+                        PriorityId = t.PriorityId,       
+                        PriorityName = t.Priority.Name,  
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
                         ProjectId = t.ProjectId,
                         ParentTaskId = t.ParentTaskId,
+                        StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
@@ -485,83 +521,41 @@ namespace TaskManagement.Controllers
                 if (requester == null)
                     return NotFound("Account not found.");
 
-                // Admin sees all tasks
-                if (requester.Role == "Admin")
+                IQueryable<TaskItem> query = _context.Tasks
+                    .Where(t => t.ProjectId == projectId && !t.IsDeleted);
+
+                if (requester.Role != "Admin")
                 {
-                    var allTasks = await _context.Tasks
-                        .Where(t => t.ProjectId == projectId && !t.IsDeleted)
-                        .Select(t => new TaskResponseDTO
-                        {
-                            Id = t.Id,
-                            Title = t.Title,
-                            Description = t.Description,
-                            Status = t.Status,
-                            Priority = t.Priority,
-                            CreatorId = t.CreatorId,
-                            CreatorName = t.Creator.Name,
-                            StoryPoints = t.StoryPoints,
-                            ProjectId = t.ProjectId,
-                            ParentTaskId = t.ParentTaskId,
-                            DueDate = t.DueDate,
-                            CreatedAt = t.CreatedAt,
-                            UpdatedAt = t.UpdatedAt,
-                            AssigneeIds = t.Assignments.Select(a => a.AccountId).ToList()
-                        })
-                        .ToListAsync();
-                    return Ok(allTasks);
+                    var projectMember = await _context.ProjectMembers
+                        .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId);
+
+                    if (projectMember == null)
+                        return StatusCode(403, "You are not a member of this project.");
+
+                    var isPrivileged = projectMember.Role == "ProjectManager" ||
+                                       projectMember.Role == "ScrumMaster" ||
+                                       projectMember.Role == "ProjectManager-ScrumMaster";
+
+                    if (!isPrivileged)
+                        query = query.Where(t => t.Assignments.Any(a => a.AccountId == requesterId));
                 }
 
-                // Check project member role
-                var projectMember = await _context.ProjectMembers
-                    .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId);
-
-                if (projectMember == null)
-                    return StatusCode(403, "You are not a member of this project.");
-
-                // PM or Scrum Master sees all tasks
-                if (projectMember.Role == "ProjectManager" ||
-                    projectMember.Role == "ScrumMaster" ||
-                    projectMember.Role == "ProjectManager-ScrumMaster")
-                {
-                    var allTasks = await _context.Tasks
-                        .Where(t => t.ProjectId == projectId && !t.IsDeleted)
-                        .Select(t => new TaskResponseDTO
-                        {
-                            Id = t.Id,
-                            Title = t.Title,
-                            Description = t.Description,
-                            Status = t.Status,
-                            Priority = t.Priority,
-                            CreatorId = t.CreatorId,
-                            CreatorName = t.Creator.Name,
-                            StoryPoints = t.StoryPoints,
-                            ProjectId = t.ProjectId,
-                            ParentTaskId = t.ParentTaskId,
-                            DueDate = t.DueDate,
-                            CreatedAt = t.CreatedAt,
-                            UpdatedAt = t.UpdatedAt,
-                            AssigneeIds = t.Assignments.Select(a => a.AccountId).ToList()
-                        })
-                        .ToListAsync();
-                    return Ok(allTasks);
-                }
-
-                // Regular member sees only assigned tasks
-                var myTasks = await _context.Tasks
-                    .Where(t => t.ProjectId == projectId && !t.IsDeleted &&
-                           t.Assignments.Any(a => a.AccountId == requesterId))
+                var tasks = await query
                     .Select(t => new TaskResponseDTO
                     {
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        Status = t.Status,
-                        Priority = t.Priority,
+                        StatusId = t.StatusId,           
+                        StatusName = t.Status.Name,      
+                        PriorityId = t.PriorityId,       
+                        PriorityName = t.Priority.Name,  
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
                         ProjectId = t.ProjectId,
                         ParentTaskId = t.ParentTaskId,
+                        StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         CreatedAt = t.CreatedAt,
                         UpdatedAt = t.UpdatedAt,
@@ -569,7 +563,7 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
-                return Ok(myTasks);
+                return Ok(tasks);
             }
             catch (Exception ex)
             {

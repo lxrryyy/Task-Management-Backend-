@@ -5,8 +5,10 @@
         public int Id { get; set; }
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string Status { get; set; } = string.Empty;
-        public string? Priority { get; set; }
+        public int StatusId { get; set; }           
+        public string StatusName { get; set; } = string.Empty; 
+        public int? PriorityId { get; set; }        
+        public string? PriorityName { get; set; }   
         public int? StoryPoints { get; set; }
         public int CreatorId { get; set; }
         public string? CreatorName { get; set; }
