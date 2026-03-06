@@ -397,10 +397,10 @@ namespace TaskManagement.Controllers
 
                     foreach (var memberId in dto.AssigneeIds.Distinct())
                     {
-                        var alreadyExists = await _context.ProjectMembers
-                       .AnyAsync(m => m.ProjectId == projectId && m.AccountId == memberId && !m.IsDeleted);
+                        var existingMember = await _context.ProjectMembers
+                        .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == memberId);
 
-                        if (!alreadyExists)
+                        if (existingMember == null)
                         {
                             _context.ProjectMembers.Add(new ProjectMember
                             {
@@ -409,6 +409,13 @@ namespace TaskManagement.Controllers
                                 Role = "Member",
                                 JoinedAt = DateTime.UtcNow
                             });
+                        }
+                        else if (existingMember.IsDeleted)
+                        {
+                            // Restore soft-deleted record instead of inserting new
+                            existingMember.IsDeleted = false;
+                            existingMember.DeletedAt = null;
+                            existingMember.Role = "Member";
                         }
                     }
                     changes.Add("Assignees updated");
@@ -443,7 +450,25 @@ namespace TaskManagement.Controllers
                 }
 
                 await _context.SaveChangesAsync();
-                return NoContent();
+
+                return Ok(new
+                {
+                    message = "Project updated successfully.",
+                    projectId = project.Id,
+                    name = project.Name,
+                    description = project.Description,
+                    statusId = project.StatusId,
+                    projectManagerId = project.ProjectManagerId,
+                    scrumMasterId = project.ScrumMasterId,
+                    startDate = project.StartDate,
+                    endDate = project.EndDate,
+                    updatedAt = project.UpdatedAt,
+                    assigneeIds = await _context.ProjectMembers
+                        .Where(m => m.ProjectId == projectId && m.Role == "Member" && !m.IsDeleted)
+                        .Select(m => m.AccountId)
+                        .ToListAsync(),
+                    updatedFields = changes
+                });
             }
             catch (Exception ex)
             {
@@ -625,6 +650,8 @@ namespace TaskManagement.Controllers
                     member.IsDeleted = true;
                     member.DeletedAt = DateTime.UtcNow;
                 }
+                project.IsDeleted = true;
+                project.DeletedAt = DateTime.UtcNow;
 
                 _context.TimeLogs.Add(new TimeLog
                 {

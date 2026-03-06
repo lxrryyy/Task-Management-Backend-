@@ -251,7 +251,22 @@ namespace TaskManagement.Controllers
 
                 await _context.SaveChangesAsync();
 
-                return CreatedAtAction(nameof(GetTaskById), new { id = task.Id }, task);
+                return CreatedAtAction(nameof(GetTaskById), new { id = task.Id }, new
+                {
+                    id = task.Id,
+                    title = task.Title,
+                    description = task.Description,
+                    statusId = task.StatusId,
+                    priorityId = task.PriorityId,
+                    projectId = task.ProjectId,
+                    parentTaskId = task.ParentTaskId,
+                    creatorId = task.CreatorId,
+                    storyPoints = task.StoryPoints,
+                    startDate = task.StartDate,
+                    dueDate = task.DueDate,
+                    createdAt = task.CreatedAt,
+                    updatedAt = task.UpdatedAt
+                });
             }
             catch (Exception ex)
             {
@@ -436,38 +451,7 @@ namespace TaskManagement.Controllers
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                task.IsDeleted = true;
-                task.UpdatedAt = DateTime.UtcNow;
-
-                var subtasks = await _context.Tasks
-                    .Where(t => t.ParentTaskId == id && !t.IsDeleted)
-                    .ToListAsync();
-
-                foreach (var subtask in subtasks)
-                {
-                    subtask.IsDeleted = true;
-                    subtask.UpdatedAt = DateTime.UtcNow;
-
-                    var subtaskAssignments = await _context.TaskAssignments
-                        .Where(a => a.TaskId == subtask.Id && !a.IsDeleted)
-                        .ToListAsync();
-
-                    foreach (var assignment in subtaskAssignments)
-                    {
-                        assignment.IsDeleted = true;
-                        assignment.DeletedAt = DateTime.UtcNow;
-                    }
-                }
-
-                var taskAssignments = await _context.TaskAssignments
-                    .Where(a => a.TaskId == id && !a.IsDeleted)
-                    .ToListAsync();
-
-                foreach (var assignment in taskAssignments)
-                {
-                    assignment.IsDeleted = true;
-                    assignment.DeletedAt = DateTime.UtcNow;
-                }
+                await SoftDeleteTaskRecursive(id);
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -475,7 +459,7 @@ namespace TaskManagement.Controllers
                     AccountId = deleterId,
                     Action = "Deleted",
                     OldValue = task.Title,
-                    Note = "Task deleted"
+                    Note = "Task and all subtasks deleted"
                 });
 
                 await _context.SaveChangesAsync();
@@ -485,6 +469,32 @@ namespace TaskManagement.Controllers
             {
                 return StatusCode(500, new { error = ex.Message });
             }
+        }
+
+        private async Task SoftDeleteTaskRecursive(int taskId)
+        {
+            var task = await _context.Tasks.FindAsync(taskId);
+            if (task == null || task.IsDeleted) return;
+
+            task.IsDeleted = true;
+            task.UpdatedAt = DateTime.UtcNow;
+
+            var assignments = await _context.TaskAssignments
+                .Where(a => a.TaskId == taskId && !a.IsDeleted)
+                .ToListAsync();
+
+            foreach (var assignment in assignments)
+            {
+                assignment.IsDeleted = true;
+                assignment.DeletedAt = DateTime.UtcNow;
+            }
+
+            var subtasks = await _context.Tasks
+                .Where(t => t.ParentTaskId == taskId && !t.IsDeleted)
+                .ToListAsync();
+
+            foreach (var subtask in subtasks)
+                await SoftDeleteTaskRecursive(subtask.Id);
         }
 
         // PATCH assign task
