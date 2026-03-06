@@ -665,5 +665,140 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
+        //deleted tasks by project
+        [HttpGet("GetDeletedTasksByProject/{projectId}")]
+        public async Task<IActionResult> GetDeletedTasksByProject(int projectId)
+        {
+            try
+            {
+                var tasks = await _context.Tasks
+                    .Where(t => t.ProjectId == projectId && t.IsDeleted && t.ParentTaskId == null)
+                    .Select(t => new
+                    {
+                        Id = t.Id,
+                        Title = t.Title,
+                        Description = t.Description,
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
+                        CreatorId = t.CreatorId,
+                        CreatorName = t.Creator.Name,
+                        ProjectId = t.ProjectId,
+                        StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
+                        DueDate = t.DueDate,
+                        UpdatedAt = t.UpdatedAt
+
+                    })
+                    .ToListAsync();
+
+                return Ok(tasks);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // GET deleted subtasks by parent task
+        [HttpGet("GetDeletedSubtasks/{parentTaskId}")]
+        public async Task<IActionResult> GetDeletedSubtasks(int parentTaskId)
+        {
+            try
+            {
+                var subtasks = await _context.Tasks
+                    .Where(t => t.ParentTaskId == parentTaskId && t.IsDeleted)
+                    .Select(t => new
+                    {
+                        Id = t.Id,
+                        Title = t.Title,
+                        Description = t.Description,
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
+                        CreatorId = t.CreatorId,
+                        CreatorName = t.Creator.Name,
+                        ProjectId = t.ProjectId,
+                        ParentTaskId = t.ParentTaskId,
+                        StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
+                        DueDate = t.DueDate,
+                        UpdatedAt = t.UpdatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(subtasks);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // PATCH reactivate task and  subtasks
+        [HttpPatch("ReactivateTask/{taskId}")]
+        public async Task<IActionResult> ReactivateTask(int taskId, [FromQuery] int requesterId)
+        {
+            try
+            {
+                var task = await _context.Tasks.FindAsync(taskId);
+                if (task == null || !task.IsDeleted)
+                    return NotFound("Deleted task not found.");
+
+                var restoredCount = await ReactivateTaskRecursive(taskId);
+
+                _context.TimeLogs.Add(new TimeLog
+                {
+                    TaskId = task.Id,
+                    AccountId = requesterId,
+                    Action = "TaskReactivated",
+                    NewValue = task.Title,
+                    Note = "Task and all subtasks reactivated"
+                });
+
+                await _context.SaveChangesAsync();
+                return Ok(new
+                {
+                    message = "Task reactivated successfully.",
+                    taskId = task.Id,
+                    restoredSubtasks = restoredCount - 1
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        private async Task<int> ReactivateTaskRecursive(int taskId)
+        {
+            var task = await _context.Tasks.FindAsync(taskId);
+            if (task == null) return 0;
+
+            task.IsDeleted = false;
+            task.UpdatedAt = DateTime.UtcNow;
+
+            var assignments = await _context.TaskAssignments
+                .Where(a => a.TaskId == taskId && a.IsDeleted)
+                .ToListAsync();
+            foreach (var assignment in assignments)
+            {
+                assignment.IsDeleted = false;
+                assignment.DeletedAt = null;
+            }
+
+            var subtasks = await _context.Tasks
+                .Where(t => t.ParentTaskId == taskId && t.IsDeleted)
+                .ToListAsync();
+
+            int count = 1;
+            foreach (var subtask in subtasks)
+                count += await ReactivateTaskRecursive(subtask.Id);
+
+            return count;
+        }
     }
 }

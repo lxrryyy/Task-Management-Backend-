@@ -76,15 +76,16 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ProjectManagerName = p.Members
-                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Where(m => m.AccountId == p.ProjectManagerId == !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
                         ScrumMasterName = p.Members
-                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Where(m => m.AccountId == p.ScrumMasterId == !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
+                            .Where(m => !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .ToList(),
                         StartDate = p.StartDate,
@@ -499,15 +500,16 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ProjectManagerName = p.Members
-                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Where(m => m.AccountId == p.ProjectManagerId == !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
                         ScrumMasterName = p.Members
-                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Where(m => m.AccountId == p.ScrumMasterId == !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
+                            .Where(m => !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .ToList(),
                         StartDate = p.StartDate,
@@ -547,15 +549,16 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ProjectManagerName = p.Members
-                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Where(m => m.AccountId == p.ProjectManagerId == !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
                         ScrumMasterName = p.Members
-                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Where(m => m.AccountId == p.ScrumMasterId == !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
+                            .Where(m => !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .ToList(),
                         StartDate = p.StartDate,
@@ -604,6 +607,7 @@ namespace TaskManagement.Controllers
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
+                            .Where(m => !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .ToList(),
                         StartDate = p.StartDate,
@@ -631,8 +635,9 @@ namespace TaskManagement.Controllers
             try
             {
                 var admin = await _context.Accounts.FindAsync(adminId);
-                if (admin == null || admin.Role != "Admin")
+                if (admin == null || admin.Role != "Admin" )
                     return StatusCode(403, "Access denied. Admins only.");
+
 
                 var project = await _context.Projects.FindAsync(id);
                 if (project == null || project.IsDeleted)
@@ -644,14 +649,34 @@ namespace TaskManagement.Controllers
                 var members = await _context.ProjectMembers
                     .Where(m => m.ProjectId == id && !m.IsDeleted)
                     .ToListAsync();
-
                 foreach (var member in members)
                 {
                     member.IsDeleted = true;
                     member.DeletedAt = DateTime.UtcNow;
                 }
+
                 project.IsDeleted = true;
                 project.DeletedAt = DateTime.UtcNow;
+
+                var tasks = await _context.Tasks
+                    .Where(t => t.ProjectId == id && !t.IsDeleted)
+                    .ToListAsync();
+
+                foreach (var task in tasks)
+                {
+                    task.IsDeleted = true;
+                    task.UpdatedAt = DateTime.UtcNow;
+
+                    var assignments = await _context.TaskAssignments
+                        .Where(a => a.TaskId == task.Id && !a.IsDeleted)
+                        .ToListAsync();
+
+                    foreach (var assignment in assignments)
+                    {
+                        assignment.IsDeleted = true;
+                        assignment.DeletedAt = DateTime.UtcNow;
+                    }
+                }
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -664,6 +689,103 @@ namespace TaskManagement.Controllers
 
                 await _context.SaveChangesAsync();
                 return NoContent();
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpGet("GetDeletedProjects")]
+        public async Task<IActionResult> GetDeletedProjects()
+        {
+            try
+            {
+                var projects = await _context.Projects
+                    .Where(p => p.IsDeleted)
+                    .Select(p => new
+                    {
+                        Id = p.Id,
+                        Name = p.Name,
+                        Description = p.Description,
+                        StatusId = p.StatusId,
+                        ProjectManagerId = p.ProjectManagerId,
+                        ScrumMasterId = p.ScrumMasterId,
+                        StartDate = p.StartDate,
+                        EndDate = p.EndDate,
+                        DeletedAt = p.DeletedAt,
+                        UpdatedAt = p.UpdatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(projects);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpPatch("ReactivateProject/{projectId}")]
+        public async Task<IActionResult> ReactivateProject(int projectId, [FromQuery] int adminId)
+        {
+            try
+            {
+                var admin = await _context.Accounts.FindAsync(adminId);
+                if (admin == null || admin.Role != "Admin")
+                    return StatusCode(403, "Access denied. Admins only.");
+
+                var project = await _context.Projects.FindAsync(projectId);
+                if (project == null || !project.IsDeleted)
+                    return NotFound("Deleted project not found.");
+
+                project.IsDeleted = false;
+                project.DeletedAt = null;
+                project.UpdatedAt = DateTime.UtcNow;
+
+                var members = await _context.ProjectMembers
+                    .Where(m => m.ProjectId == projectId && m.IsDeleted)
+                    .ToListAsync();
+                foreach (var member in members)
+                {
+                    member.IsDeleted = false;
+                    member.DeletedAt = null;
+                }
+
+                var tasks = await _context.Tasks
+                    .Where(t => t.ProjectId == projectId && t.IsDeleted)
+                    .ToListAsync();
+                foreach (var task in tasks)
+                {
+                    task.IsDeleted = false;
+                    task.UpdatedAt = DateTime.UtcNow;
+
+                    var assignments = await _context.TaskAssignments
+                        .Where(a => a.TaskId == task.Id && a.IsDeleted)
+                        .ToListAsync();
+                    foreach (var assignment in assignments)
+                    {
+                        assignment.IsDeleted = false;
+                        assignment.DeletedAt = null;
+                    }
+                }
+
+                _context.TimeLogs.Add(new TimeLog
+                {
+                    TaskId = null,
+                    AccountId = adminId,
+                    Action = "ProjectReactivated",
+                    NewValue = project.Name,
+                    Note = "Project and all tasks reactivated by admin"
+                });
+
+                await _context.SaveChangesAsync();
+                return Ok(new
+                {
+                    message = "Project reactivated successfully.",
+                    projectId = project.Id,
+                    restoredTasks = tasks.Count
+                });
             }
             catch (Exception ex)
             {
