@@ -514,7 +514,7 @@ namespace TaskManagement.Controllers
                 if (assigner.Role != "Admin")
                 {
                     var projectMember = await _context.ProjectMembers
-                        .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById);
+                        .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById && !m.IsDeleted);
 
                     if (projectMember == null)
                         return StatusCode(403, "You are not a member of this project.");

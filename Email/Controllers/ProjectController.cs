@@ -76,12 +76,12 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ProjectManagerName = p.Members
-                            .Where(m => m.AccountId == p.ProjectManagerId == !m.IsDeleted)
+                            .Where(m => m.AccountId == p.ProjectManagerId && !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
                         ScrumMasterName = p.Members
-                            .Where(m => m.AccountId == p.ScrumMasterId == !m.IsDeleted)
+                            .Where(m => m.AccountId == p.ScrumMasterId && !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
@@ -549,12 +549,12 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ProjectManagerName = p.Members
-                            .Where(m => m.AccountId == p.ProjectManagerId == !m.IsDeleted)
+                            .Where(m => m.AccountId == p.ProjectManagerId && !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
                         ScrumMasterName = p.Members
-                            .Where(m => m.AccountId == p.ScrumMasterId == !m.IsDeleted)
+                            .Where(m => m.AccountId == p.ScrumMasterId && !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
@@ -598,12 +598,12 @@ namespace TaskManagement.Controllers
                         CreatedByName = p.CreatedBy.Name,
                         ProjectManagerId = p.ProjectManagerId,
                         ProjectManagerName = p.Members
-                            .Where(m => m.AccountId == p.ProjectManagerId)
+                            .Where(m => m.AccountId == p.ProjectManagerId && !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         ScrumMasterId = p.ScrumMasterId,
                         ScrumMasterName = p.Members
-                            .Where(m => m.AccountId == p.ScrumMasterId)
+                            .Where(m => m.AccountId == p.ScrumMasterId && !m.IsDeleted)
                             .Select(m => m.Account.Name)
                             .FirstOrDefault(),
                         MemberNames = p.Members
