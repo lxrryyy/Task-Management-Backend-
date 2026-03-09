@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography.Pkcs;
 using TaskManagement.Data;
 using TaskManagement.DTOs.Task;
 using TaskManagement.Models;
@@ -16,7 +17,6 @@ namespace TaskManagement.Controllers
         {
             _context = context;
         }
-
 
         [HttpGet("GetAllTasksPriorities")]
         public async Task<IActionResult> GetAllTasksPriorities()
@@ -217,7 +217,7 @@ namespace TaskManagement.Controllers
                         Action = "ProjectStatusChanged",
                         OldValue = "Not Started",
                         NewValue = "Active",
-                        Note = "Project set to Active because a task was created"
+                        Note = $"Project set to Active because a task was created by {creator.Name} ({creator.Role})"
                     });
                 }
 
@@ -240,6 +240,7 @@ namespace TaskManagement.Controllers
                 // Time log
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = creatorId,
                     Action = "Created",
@@ -327,7 +328,6 @@ namespace TaskManagement.Controllers
                     changes.Add($"StatusId: {task.StatusId} → {dto.StatusId}");
                     task.StatusId = dto.StatusId.Value;
                 }
-
               
                 if (dto.PriorityId.HasValue && dto.PriorityId != task.PriorityId)
                 {
@@ -361,17 +361,23 @@ namespace TaskManagement.Controllers
                 }
 
                 task.UpdatedAt = DateTime.UtcNow;
+
+                var updaterProjectMember = await _context.ProjectMembers
+                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == updaterId && !m.IsDeleted);
+                var updaterProjectRole = updater.Role == "Admin" ? "Admin" : updaterProjectMember?.Role ?? "Unknown";
+
                 await _context.SaveChangesAsync();
 
                 if (changes.Any())
                 {
                     _context.TimeLogs.Add(new TimeLog
                     {
+                        ProjectId = task.ProjectId,
                         TaskId = task.Id,
                         AccountId = updaterId,
                         Action = "Updated",
                         NewValue = string.Join(", ", changes),
-                        Note = "Task updated"
+                        Note = $"Task updated by {updater.Name}, ({updaterProjectRole})"
                     });
                     await _context.SaveChangesAsync();
                 }
@@ -414,23 +420,26 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "You are not assigned to this task.");
                 }
 
-                // Validate StatusId
-                var statusExists = await _context.TaskStatuses.AnyAsync(s => s.Id == dto.StatusId);
-                if (!statusExists)
+                var oldStatus = await _context.TaskStatuses.FirstOrDefaultAsync(s => s.Id == task.StatusId);
+                var newStatus = await _context.TaskStatuses.FirstOrDefaultAsync(s => s.Id == dto.StatusId);
+                if (newStatus == null)
                     return BadRequest("Invalid StatusId.");
 
-                var oldStatusId = task.StatusId;
-                task.StatusId = dto.StatusId; 
+                var oldStatusName = oldStatus?.Name ?? task.StatusId.ToString();
+                var newStatusName = newStatus.Name;
+
+                task.StatusId = dto.StatusId;
                 task.UpdatedAt = DateTime.UtcNow;
 
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
-                    Action = "StatusUpdated",
-                    OldValue = oldStatusId.ToString(),
-                    NewValue = dto.StatusId.ToString(),
-                    Note = $"Status changed from {oldStatusId} to {dto.StatusId}"
+                    Action = "Status Updated",
+                    OldValue = oldStatusName,
+                    NewValue = newStatusName,
+                    Note = $"Status changed from {oldStatusName} to {newStatusName}"
                 });
 
                 await _context.SaveChangesAsync();
@@ -451,15 +460,24 @@ namespace TaskManagement.Controllers
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
+                var deleter = await _context.Accounts.FindAsync(deleterId);
+                if (deleter == null)
+                    return NotFound("Deleter account not found.");
+
+                var deleterProjectMember = await _context.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == deleterId && !m.IsDeleted);
+
+                var deleterRole = deleter.Role == "Admin" ? "Admin" : deleterProjectMember?.Role ?? "Unknown";
+
                 await SoftDeleteTaskRecursive(id);
 
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = deleterId,
                     Action = "Deleted",
                     OldValue = task.Title,
-                    Note = "Task and all subtasks deleted"
+                    Note = $"Task and all subtasks deleted by {deleter.Name}, ({deleterRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -546,14 +564,19 @@ namespace TaskManagement.Controllers
                 }
 
                 task.UpdatedAt = DateTime.UtcNow;
+                var assignerProjectMember = await _context.ProjectMembers
+                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById && !m.IsDeleted);
+
+                var assignerProjectRole = assigner.Role == "Admin" ? "Admin" : assignerProjectMember?.Role ?? "Unknown";
 
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = task.ProjectId,
                     TaskId = id,
                     AccountId = dto.AssignedById,
                     Action = "Assigned",
                     NewValue = string.Join(", ", dto.AssigneeIds),
-                    Note = "Task assigned"
+                    Note = $"Task assigned by {assigner.Name}, {assignerProjectRole}"
                 });
 
                 await _context.SaveChangesAsync();
@@ -748,15 +771,24 @@ namespace TaskManagement.Controllers
                 if (task == null || !task.IsDeleted)
                     return NotFound("Deleted task not found.");
 
+                var requester = await _context.Accounts.FindAsync(requesterId);
+                if (requester == null)
+                    return NotFound("Account not found.");
+
+                var requesterProjectMember = await _context.ProjectMembers
+                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId && !m.IsDeleted);
+                var requesterRole = requester.Role == "Admin" ? "Admin" : requesterProjectMember?.Role ?? "Unknown";
+
                 var restoredCount = await ReactivateTaskRecursive(taskId);
 
                 _context.TimeLogs.Add(new TimeLog
-                {
+                {  
+                    ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
                     Action = "TaskReactivated",
                     NewValue = task.Title,
-                    Note = "Task and all subtasks reactivated"
+                    Note = $"Task and all subtasks reactivated {requester.Name}, {requesterRole}"
                 });
 
                 await _context.SaveChangesAsync();

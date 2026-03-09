@@ -2,6 +2,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Identity.Client;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using TaskManagement.Data;
 using TaskManagement.DTOs.Project;
 using TaskManagement.Models;
@@ -241,8 +242,10 @@ namespace TaskManagement.Controllers
                     }
                 }
 
+                await _context.SaveChangesAsync();
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = project.Id,
                     TaskId = null,
                     AccountId = creatorId,
                     Action = "ProjectCreated",
@@ -250,7 +253,6 @@ namespace TaskManagement.Controllers
                     Note = $"Project created by {creator.Name}"
                 });
 
-                await _context.SaveChangesAsync();
 
                 var pmAccount = await _context.Accounts.FindAsync(projectManagerId);
                 var smAccount = scrumMasterId.HasValue
@@ -503,6 +505,7 @@ namespace TaskManagement.Controllers
                 {
                     _context.TimeLogs.Add(new TimeLog
                     {
+                        ProjectId = project.Id,
                         TaskId = null,
                         AccountId = requesterId,
                         Action = "ProjectUpdated",
@@ -727,9 +730,6 @@ namespace TaskManagement.Controllers
                     member.DeletedAt = DateTime.UtcNow;
                 }
 
-                project.IsDeleted = true;
-                project.DeletedAt = DateTime.UtcNow;
-
                 var tasks = await _context.Tasks
                     .Where(t => t.ProjectId == id && !t.IsDeleted)
                     .ToListAsync();
@@ -749,14 +749,17 @@ namespace TaskManagement.Controllers
                         assignment.DeletedAt = DateTime.UtcNow;
                     }
                 }
+               
+                var deleterRole = account.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
 
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
                     Action = "ProjectDeleted",
                     OldValue = project.Name,
-                    Note = "Project deleted by admin"
+                    Note = $"Project deleted by {account.Name}, ({deleterRole})"
                 });
 
                 await _context.SaveChangesAsync();

@@ -126,6 +126,12 @@ namespace TaskManagement.Controllers
             _context.Accounts.Add(newAccount);
             await _context.SaveChangesAsync();
 
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = newAccount.Id,
+                Action = "Account Created",
+                Timestamp = DateTime.UtcNow
+            });
             return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, newAccount);
         }
 
