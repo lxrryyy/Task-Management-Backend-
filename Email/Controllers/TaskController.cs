@@ -167,6 +167,12 @@ namespace TaskManagement.Controllers
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can create tasks.");
                 }
+                if (dto.StartDate == default)
+                    return BadRequest("Start date is required.");
+                if (dto.DueDate == default)
+                    return BadRequest("End date is required.");
+                if (dto.DueDate <= dto.StartDate)
+                    return BadRequest("End date must be after start date.");
 
                 // Validate story points
                 if (dto.StoryPoints.HasValue && (dto.StoryPoints < 1 || dto.StoryPoints > 5))
@@ -203,6 +209,10 @@ namespace TaskManagement.Controllers
                 _context.Tasks.Add(task);
                 await _context.SaveChangesAsync();
 
+                var projectMemberCheck = await _context.ProjectMembers
+                        .FirstOrDefaultAsync(m => m.ProjectId == dto.ProjectId && m.AccountId == creatorId && !m.IsDeleted);
+                var creatorRole = creator.Role != "Admin" ? projectMemberCheck?.Role ?? "Unknown" : "Admin";
+
                 // Auto set project status to Active (StatusId = 2)
                 var project = await _context.Projects.FindAsync(dto.ProjectId);
                 if (project != null && project.StatusId == 1) // 1 = Not Started
@@ -212,12 +222,13 @@ namespace TaskManagement.Controllers
 
                     _context.TimeLogs.Add(new TimeLog
                     {
+                        ProjectId = project.Id,
                         TaskId = null,
                         AccountId = creatorId,
-                        Action = "ProjectStatusChanged",
+                        Action = "Project Status Changed",
                         OldValue = "Not Started",
                         NewValue = "Active",
-                        Note = $"Project set to Active because a task was created by {creator.Name} ({creator.Role})"
+                        Note = $"Project set to Active because a task was created by {creator.Name} ({creatorRole})"
                     });
                 }
 
@@ -246,8 +257,8 @@ namespace TaskManagement.Controllers
                     Action = "Created",
                     NewValue = task.Title,
                     Note = dto.ParentTaskId == null
-                        ? $"Task created by {creator.Name} ({creator.Role})"
-                        : $"Subtask created by {creator.Name} ({creator.Role})"
+                        ? $"Task created by {creator.Name} ({creatorRole})"
+                        : $"Subtask created by {creator.Name} ({creatorRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -349,6 +360,14 @@ namespace TaskManagement.Controllers
                     changes.Add($"DueDate: {task.DueDate} → {dto.DueDate}");
                     task.DueDate = dto.DueDate;
                 }
+
+                if (dto.StartDate == default)
+                    return BadRequest("Start date is required.");
+                if (dto.DueDate == default)
+                    return BadRequest("End date is required.");
+                if (dto.DueDate <= dto.StartDate)
+                    return BadRequest("End date must be after start date.");
+
                 if (dto.StoryPoints.HasValue && dto.StoryPoints != task.StoryPoints)
                 {
                     changes.Add($"StoryPoints: {task.StoryPoints} → {dto.StoryPoints}");
@@ -431,6 +450,10 @@ namespace TaskManagement.Controllers
                 task.StatusId = dto.StatusId;
                 task.UpdatedAt = DateTime.UtcNow;
 
+                var requesterProjectMemberCheck = await _context.ProjectMembers
+                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId && !m.IsDeleted);
+                var requesterProjectRole = requester.Role == "Admin" ? "Admin" : requesterProjectMemberCheck?.Role ?? "Unknown";
+
                 _context.TimeLogs.Add(new TimeLog
                 {
                     ProjectId = task.ProjectId,
@@ -439,7 +462,7 @@ namespace TaskManagement.Controllers
                     Action = "Status Updated",
                     OldValue = oldStatusName,
                     NewValue = newStatusName,
-                    Note = $"Status changed from {oldStatusName} to {newStatusName}"
+                    Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name}, ({requesterProjectRole})"
                 });
 
                 await _context.SaveChangesAsync();

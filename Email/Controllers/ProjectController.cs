@@ -501,6 +501,8 @@ namespace TaskManagement.Controllers
 
                 project.UpdatedAt = DateTime.UtcNow;
 
+                var requesterRole = requester.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
+
                 if (changes.Any())
                 {
                     _context.TimeLogs.Add(new TimeLog
@@ -508,9 +510,9 @@ namespace TaskManagement.Controllers
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = requesterId,
-                        Action = "ProjectUpdated",
+                        Action = "Project Updated",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Project updated by {requester.Name}"
+                        Note = $"Project updated by {requester.Name}, ({requesterRole})"
                     });
                 }
 
