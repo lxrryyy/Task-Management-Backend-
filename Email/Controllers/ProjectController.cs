@@ -512,7 +512,7 @@ namespace TaskManagement.Controllers
                         AccountId = requesterId,
                         Action = "Project Updated",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Project updated by {requester.Name}, ({requesterRole})"
+                        Note = $"Project updated by {requester.Name} ({requesterRole})"
                     });
                 }
 
@@ -759,9 +759,9 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "ProjectDeleted",
+                    Action = "Project Deleted",
                     OldValue = project.Name,
-                    Note = $"Project deleted by {account.Name}, ({deleterRole})"
+                    Note = $"Project deleted by {account.Name} ({deleterRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -833,7 +833,9 @@ namespace TaskManagement.Controllers
 
                 var projectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == accountId);
-
+                
+                var projectMemberRole = account.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
+                
                 var isAdmin = account.Role == "Admin";
                 var isProjectManager = projectMember?.Role == "ProjectManager" ||
                                        projectMember?.Role == "ProjectManager-ScrumMaster";
@@ -879,11 +881,12 @@ namespace TaskManagement.Controllers
 
                 _context.TimeLogs.Add(new TimeLog
                 {
+                    ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "ProjectReactivated",
+                    Action = "Project Reactivated",
                     NewValue = project.Name,
-                    Note = "Project and all tasks reactivated by admin"
+                    Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})"
                 });
 
                 await _context.SaveChangesAsync();

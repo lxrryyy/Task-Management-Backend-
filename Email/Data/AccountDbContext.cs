@@ -23,7 +23,7 @@ namespace TaskManagement.Data
         public DbSet<TaskItemStatus> TaskStatuses { get; set; }
         public DbSet<TaskPriority> TaskPriorities { get; set; }
         public DbSet<ProjectStatus> ProjectStatuses { get; set; }
-
+        public DbSet<OtpCode> OtpCodes { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);

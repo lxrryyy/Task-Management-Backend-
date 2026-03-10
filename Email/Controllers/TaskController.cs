@@ -396,7 +396,7 @@ namespace TaskManagement.Controllers
                         AccountId = updaterId,
                         Action = "Updated",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Task updated by {updater.Name}, ({updaterProjectRole})"
+                        Note = $"Task updated by {updater.Name} ({updaterProjectRole})"
                     });
                     await _context.SaveChangesAsync();
                 }
@@ -462,7 +462,7 @@ namespace TaskManagement.Controllers
                     Action = "Status Updated",
                     OldValue = oldStatusName,
                     NewValue = newStatusName,
-                    Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name}, ({requesterProjectRole})"
+                    Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name} ({requesterProjectRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -500,7 +500,7 @@ namespace TaskManagement.Controllers
                     AccountId = deleterId,
                     Action = "Deleted",
                     OldValue = task.Title,
-                    Note = $"Task and all subtasks deleted by {deleter.Name}, ({deleterRole})"
+                    Note = $"Task and all subtasks deleted by {deleter.Name} ({deleterRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -599,7 +599,7 @@ namespace TaskManagement.Controllers
                     AccountId = dto.AssignedById,
                     Action = "Assigned",
                     NewValue = string.Join(", ", dto.AssigneeIds),
-                    Note = $"Task assigned by {assigner.Name}, {assignerProjectRole}"
+                    Note = $"Task assigned by {assigner.Name} ({assignerProjectRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -811,7 +811,7 @@ namespace TaskManagement.Controllers
                     AccountId = requesterId,
                     Action = "TaskReactivated",
                     NewValue = task.Title,
-                    Note = $"Task and all subtasks reactivated {requester.Name}, {requesterRole}"
+                    Note = $"Task and all subtasks reactivated {requester.Name} ({requesterRole})"
                 });
 
                 await _context.SaveChangesAsync();

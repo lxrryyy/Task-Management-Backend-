@@ -10,5 +10,6 @@ namespace TaskManagement.Models
         public bool Revoked { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime ExpiresAt { get; set; }
+        public Account Account { get; set; } = null!;
     }
 }
