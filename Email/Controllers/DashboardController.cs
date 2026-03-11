@@ -7,7 +7,7 @@ namespace TaskManagement.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class DashboardController : ControllerBase
+    public class DashboardController : ControllerBase     
     {
         private readonly AccountDbContext _context;
 
@@ -16,7 +16,7 @@ namespace TaskManagement.Controllers
             _context = context;
         }
 
-        [HttpGet("MyProjectsAndTasks")]
+        [HttpGet("MyProjectsAndTasks")]   // return all projects and tasks with subtasks
         public async Task<IActionResult> GetMyProjectsAndTasks([FromQuery] int requesterId)
         {
             try
@@ -38,59 +38,79 @@ namespace TaskManagement.Controllers
                 }
 
                 var projects = await projectQuery
-                    .Select(p => new
-                    {
-                        p.Id,
-                        p.Name,
-                        p.Description,
-                        StatusId = p.StatusId,
-                        StatusName = p.Status.Name,
-                        p.CreatedAt,
-                        p.UpdatedAt,
-                        Tasks = _context.Tasks
-                            .Where(t => t.ProjectId == p.Id && !t.IsDeleted && t.ParentTaskId == null &&
-                                (requester.Role == "Admin" ||
-                                 _context.TaskAssignments.Any(a => a.TaskId == t.Id && a.AccountId == requesterId && !a.IsDeleted) ||
-                                 _context.ProjectMembers.Any(m => m.ProjectId == p.Id && m.AccountId == requesterId && !m.IsDeleted &&
-                                     (m.Role == "ProjectManager" || m.Role == "ScrumMaster" || m.Role == "ProjectManager-ScrumMaster"))))
-                            .Select(t => new
-                            {
-                                t.Id,
-                                t.Title,
-                                t.Description,
-                                t.StatusId,
-                                StatusName = t.Status.Name,
-                                t.PriorityId,
-                                PriorityName = t.Priority.Name,
-                                t.StoryPoints,
-                                t.StartDate,
-                                t.DueDate,
-                                t.CreatedAt,
-                                t.UpdatedAt,
-                                AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList(),
-                                Subtasks = _context.Tasks
-                                    .Where(s => s.ParentTaskId == t.Id && !s.IsDeleted)
-                                    .Select(s => new
-                                    {
-                                        s.Id,
-                                        s.Title,
-                                        s.Description,
-                                        s.StatusId,
-                                        StatusName = s.Status.Name,
-                                        s.PriorityId,
-                                        PriorityName = s.Priority.Name,
-                                        s.StoryPoints,
-                                        s.StartDate,
-                                        s.DueDate,
-                                        s.CreatedAt,
-                                        s.UpdatedAt,
-                                        AssigneeIds = s.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
-                                    }).ToList()
-                            }).ToList()
-                    })
-                    .ToListAsync();
+                .Select(p => new
+                {
+                    p.Id,
+                    p.Name,
+                    p.Description,
+                    p.StatusId,
+                    StatusName = p.Status.Name,
+                    p.CreatedAt,
+                    p.UpdatedAt,
+                    RootTasks = _context.Tasks
+                        .Where(t => t.ProjectId == p.Id && !t.IsDeleted && t.ParentTaskId == null &&
+                            (requester.Role == "Admin" ||
+                             _context.TaskAssignments.Any(a => a.TaskId == t.Id && a.AccountId == requesterId && !a.IsDeleted) ||
+                             _context.ProjectMembers.Any(m => m.ProjectId == p.Id && m.AccountId == requesterId && !m.IsDeleted &&
+                                 (m.Role == "ProjectManager" || m.Role == "ScrumMaster" || m.Role == "ProjectManager-ScrumMaster"))))
+                        .Select(t => new
+                        {
+                            t.Id,
+                            t.Title,
+                            t.Description,
+                            t.StatusId,
+                            StatusName = t.Status.Name,
+                            t.PriorityId,
+                            PriorityName = t.Priority.Name,
+                            t.StoryPoints,
+                            t.StartDate,
+                            t.DueDate,
+                            t.CreatedAt,
+                            t.UpdatedAt,
+                            AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
+                        }).ToList()
+                })
+                .ToListAsync();
 
-                return Ok(projects);
+                var finalResult = new List<object>();
+                foreach (var project in projects)
+                {
+                    var tasksWithSubtasks = new List<object>();
+                    foreach (var task in project.RootTasks)
+                    {
+                        tasksWithSubtasks.Add(new
+                        {
+                            task.Id,
+                            task.Title,
+                            task.Description,
+                            task.StatusId,
+                            task.StatusName,
+                            task.PriorityId,
+                            task.PriorityName,
+                            task.StoryPoints,
+                            task.StartDate,
+                            task.DueDate,
+                            task.CreatedAt,
+                            task.UpdatedAt,
+                            task.AssigneeIds,
+                            Subtasks = await GetSubtasksRecursive(task.Id)
+                        });
+                    }
+
+                    finalResult.Add(new
+                    {
+                        project.Id,
+                        project.Name,
+                        project.Description,
+                        project.StatusId,
+                        project.StatusName,
+                        project.CreatedAt,
+                        project.UpdatedAt,
+                        Tasks = tasksWithSubtasks
+                    });
+                }
+
+                return Ok(finalResult);
             }
             catch (Exception ex)
             {
@@ -98,7 +118,54 @@ namespace TaskManagement.Controllers
             }
         }
 
-        [HttpGet("ProjectStatusSummary")]
+        private async Task<List<object>> GetSubtasksRecursive(int parentId)
+        {
+            var subtasks = await _context.Tasks
+                .Where(s => s.ParentTaskId == parentId && !s.IsDeleted)
+                .Select(s => new
+                {
+                    s.Id,
+                    s.Title,
+                    s.Description,
+                    s.StatusId,
+                    StatusName = s.Status.Name,
+                    s.PriorityId,
+                    PriorityName = s.Priority.Name,
+                    s.StoryPoints,
+                    s.StartDate,
+                    s.DueDate,
+                    s.CreatedAt,
+                    s.UpdatedAt,
+                    AssigneeIds = s.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
+                })
+                .ToListAsync();
+
+            var result = new List<object>();
+            foreach (var subtask in subtasks)
+            {
+                result.Add(new
+                {
+                    subtask.Id,
+                    subtask.Title,
+                    subtask.Description,
+                    subtask.StatusId,
+                    subtask.StatusName,
+                    subtask.PriorityId,
+                    subtask.PriorityName,
+                    subtask.StoryPoints,
+                    subtask.StartDate,
+                    subtask.DueDate,
+                    subtask.CreatedAt,
+                    subtask.UpdatedAt,
+                    subtask.AssigneeIds,
+                    Subtasks = await GetSubtasksRecursive(subtask.Id) 
+                });
+            }
+
+            return result;
+        }
+
+        [HttpGet("ProjectStatusSummary")] // return count and percentage (Active, Completed, Not Started)-PROJECTS
         public async Task<IActionResult> GetProjectStatusSummary([FromQuery] int requesterId)
         {
             try
@@ -160,7 +227,7 @@ namespace TaskManagement.Controllers
             }
         }
 
-        [HttpGet("TaskStatusSummary")]
+        [HttpGet("TaskStatusSummary")] // return count and percentage (Not Started, In Progress, Completed, For Review)-PROJECTS
         public async Task<IActionResult> GetTaskStatusSummary([FromQuery] int requesterId)
         {
             try
@@ -229,7 +296,7 @@ namespace TaskManagement.Controllers
             }
         }
 
-        [HttpGet("ProjectTaskSummary/{projectId}")]
+        [HttpGet("ProjectTaskSummary/{projectId}")] // return count and percentage (Completed, Working On)
         public async Task<IActionResult> GetProjectTaskSummary(int projectId, [FromQuery] int requesterId)
         {
             try
@@ -278,7 +345,9 @@ namespace TaskManagement.Controllers
 
                 var total = tasks.Count;
                 var completed = tasks.Count(t => t.StatusId == 4);
-                var workingOn = tasks.Count(t => t.StatusId != 4);
+                var forReview = tasks.Count(t => t.StatusId == 3);
+                var inProgress = tasks.Count(t => t.StatusId == 2);
+                var notStarted = tasks.Count(t => t.StatusId == 1);
 
                 return Ok(new
                 {
@@ -291,10 +360,20 @@ namespace TaskManagement.Controllers
                         Count = completed,
                         Percentage = total == 0 ? 0.0 : Math.Round((double)completed / total * 100, 2)
                     },
-                    WorkingOn = new
+                    ForReview = new
                     {
-                        Count = workingOn,
-                        Percentage = total == 0 ? 0.0 : Math.Round((double)workingOn / total * 100, 2)
+                        Count = forReview,
+                        Percentage = total == 0 ? 0.0 : Math.Round((double)forReview / total * 100, 2)
+                    },
+                    InProgress = new
+                    {
+                        Count = inProgress,
+                        Percentage = total == 0 ? 0.0 : Math.Round((double)inProgress / total * 100, 2)
+                    },
+                    NotStarted = new
+                    {
+                        Count = notStarted,
+                        Percentage = total == 0 ? 0.0 : Math.Round((double)notStarted / total * 100, 2)
                     }
                 });
             }

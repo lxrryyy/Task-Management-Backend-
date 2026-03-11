@@ -419,40 +419,43 @@ namespace TaskManagement.Controllers
                 if (task == null || task.IsDeleted)
                     return NotFound("Task not found.");
 
-                var isAssigned = await _context.TaskAssignments
-                    .AnyAsync(a => a.TaskId == id && a.AccountId == requesterId && !a.IsDeleted);
-
                 var requester = await _context.Accounts.FindAsync(requesterId);
                 if (requester == null)
                     return NotFound("Account not found.");
 
-                if (requester.Role != "Admin")
-                {
-                    var projectMember = await _context.ProjectMembers
-                        .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId);
+                var isAssigned = await _context.TaskAssignments
+                    .AnyAsync(a => a.TaskId == id && a.AccountId == requesterId && !a.IsDeleted);
 
-                    var isPrivileged = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ScrumMaster" ||
+                var projectMember = await _context.ProjectMembers
+                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId && !m.IsDeleted);
+
+                var isAdmin = requester.Role == "Admin";
+                var isProjectManager = projectMember?.Role == "ProjectManager" ||
                                        projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isPrivileged = isProjectManager ||
+                                   projectMember?.Role == "ScrumMaster";
 
-                    if (!isPrivileged && !isAssigned)
-                        return StatusCode(403, "You are not assigned to this task.");
-                }
+                if (!isAdmin && !isPrivileged && !isAssigned)
+                    return StatusCode(403, "You are not assigned to this task.");
 
-                var oldStatus = await _context.TaskStatuses.FirstOrDefaultAsync(s => s.Id == task.StatusId);
                 var newStatus = await _context.TaskStatuses.FirstOrDefaultAsync(s => s.Id == dto.StatusId);
                 if (newStatus == null)
                     return BadRequest("Invalid StatusId.");
 
+                if (dto.StatusId == 4 && !isProjectManager && !isAdmin)
+                    return StatusCode(403, "Only the Project Manager can mark a task as Completed.");
+
+                if (dto.StatusId == 3 && !isAssigned && !isProjectManager && !isAdmin)
+                    return StatusCode(403, "Only an assigned member can submit this task for review.");
+
+                var oldStatus = await _context.TaskStatuses.FirstOrDefaultAsync(s => s.Id == task.StatusId);
                 var oldStatusName = oldStatus?.Name ?? task.StatusId.ToString();
                 var newStatusName = newStatus.Name;
 
                 task.StatusId = dto.StatusId;
                 task.UpdatedAt = DateTime.UtcNow;
 
-                var requesterProjectMemberCheck = await _context.ProjectMembers
-                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId && !m.IsDeleted);
-                var requesterProjectRole = requester.Role == "Admin" ? "Admin" : requesterProjectMemberCheck?.Role ?? "Unknown";
+                var requesterProjectRole = isAdmin ? "Admin" : projectMember?.Role ?? "Unknown";
 
                 _context.TimeLogs.Add(new TimeLog
                 {
