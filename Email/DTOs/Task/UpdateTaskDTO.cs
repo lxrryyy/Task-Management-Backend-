@@ -6,8 +6,8 @@ namespace TaskManagement.DTOs.Task
     {
         public string? Title { get; set; }
         public string? Description { get; set; }
-        public string? Status { get; set; }
-        public string? Priority { get; set; }
+        public int? StatusId { get; set; }        
+        public int? PriorityId { get; set; }
         public int? StoryPoints { get; set; }
         public DateTime? StartDate { get; set; }
         public DateTime? DueDate { get; set; }

@@ -2,7 +2,7 @@
 {
     public class ForceUpdateStatusDTO
     {
-        public string Status { get; set; } = string.Empty;
+        public int StatusId { get; set; }
         public string? Note { get; set; }
     }
 }

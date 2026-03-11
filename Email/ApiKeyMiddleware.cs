@@ -12,8 +12,11 @@ public class ApiKeyMiddleware
     public async Task InvokeAsync(HttpContext context, IConfiguration config)
     {
         // Skip auth for Swagger UI
-        if (context.Request.Path.StartsWithSegments("/swagger"))
-        {
+        if (context.Request.Path.StartsWithSegments("/swagger") ||
+            context.Request.Path.StartsWithSegments("/api/Auth/ForgotPassword") ||
+            context.Request.Path.StartsWithSegments("/api/Auth/VerifyOtp") ||
+            context.Request.Path.StartsWithSegments("/api/Auth/ResetPassword"))
+        { 
             await _next(context);
             return;
         }

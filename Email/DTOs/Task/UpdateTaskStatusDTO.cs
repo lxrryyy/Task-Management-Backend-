@@ -2,7 +2,7 @@
 {
     public class UpdateTaskStatusDTO
     {
-        public string Status { get; set; } = string.Empty;
+        public int StatusId { get; set; } 
         // Not started, In Progress, Completed, For Review
     }
 }

@@ -19,6 +19,7 @@ namespace TaskManagement.Services
             var smtpUser = _config["Smtp:Username"];
             var smtpPass = _config["Smtp:Password"];
             var fromEmail = _config["Smtp:From"];
+            var fromName = _config["Smtp:FromName"];
 
             using var client = new SmtpClient(smtpHost, smtpPort)
             {
@@ -28,7 +29,7 @@ namespace TaskManagement.Services
 
             var mailMessage = new MailMessage
             {
-                From = new MailAddress(fromEmail!),
+                From = new MailAddress(fromEmail!, fromName),
                 Subject = subject,
                 Body = body,
                 IsBodyHtml = true
@@ -71,6 +72,19 @@ namespace TaskManagement.Services
                 <p><strong>Task:</strong> {taskTitle}</p>
                 <p><strong>Due Date:</strong> {dueDate:MMMM dd, yyyy}</p>
                 <p>Please make sure to complete the task before the deadline.</p>
+            ";
+            await SendEmailAsync(toEmail, subject, body);
+        }
+        public async Task SendOtpAsync(string toEmail, string name, string otp)
+        {
+            var subject = "Password Reset OTP";
+            var body = $@"
+                <h2>Password Reset Request</h2>
+                <p>Hello <strong>{name}</strong>,</p>
+                <p>Your OTP code for password reset is:</p>
+                <h1 style='letter-spacing: 8px; color: #4F46E5;'>{otp}</h1>
+                <p>This OTP is valid for <strong>15 minutes</strong>.</p>
+                <p>If you did not request this, please ignore this email.</p>
             ";
             await SendEmailAsync(toEmail, subject, body);
         }

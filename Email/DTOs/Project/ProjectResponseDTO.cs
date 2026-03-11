@@ -5,7 +5,8 @@
         public int Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string Status { get; set; } = string.Empty;
+        public int StatusId { get; set; }
+        public string StatusName { get; set; } = string.Empty;
         public int CompletionPercentage { get; set; }
         public int CreatedById { get; set; }
         public string? CreatedByName { get; set; }

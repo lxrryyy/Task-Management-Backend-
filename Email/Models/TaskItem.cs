@@ -11,12 +11,14 @@ namespace TaskManagement.Models
         [Required]
         public string Title { get; set; } = string.Empty;
         public string? Description { get; set; }
-        public string Status { get; set; } = "Not Started"; // Not Started, InProgress, For Review, Completed
-        public string? Priority { get; set; } // Urgent, Important, Medium, Low 
+        public int StatusId { get; set; }       //FK   
+        public int? PriorityId { get; set; }       //FK
+        public TaskItemStatus Status { get; set; }     //nav
+        public TaskPriority? Priority { get; set; }  //nav
         public int CreatorId { get; set; }
         public Account Creator { get; set; }
-        public int ProjectId { get; set; }          // Prod Id
-        public int? ParentTaskId { get; set; }      // ParentTaskId
+        public int ProjectId { get; set; } // Prod Id
+        public int? ParentTaskId { get; set; } // ParentTaskId
         public int? StoryPoints { get; set; } // 1, 2, 3, 4, 5
         public DateTime? StartDate { get; set; }
         public DateTime? DueDate { get; set; }

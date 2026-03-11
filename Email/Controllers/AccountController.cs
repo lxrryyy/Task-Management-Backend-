@@ -1,13 +1,15 @@
-﻿using TaskManagement.Data;
-using TaskManagement.DTOs;
-using TaskManagement.Models;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Runtime.CompilerServices;
+using System.Security.Principal;
 using System.Threading.Tasks;
+using TaskManagement.Data;
+using TaskManagement.DTOs;
+using TaskManagement.Models;
 
 namespace TaskManagement.Controllers
 {
@@ -90,13 +92,13 @@ namespace TaskManagement.Controllers
             if (newAccount is null)
                 return BadRequest();
 
-            // validation ng email
-            var allowedDomains = _config.GetSection("AllowedEmailDomains").Get<List<string>>()
-                     ?? new List<string>();
-
-            if (!allowedDomains.Any(domain =>
-                newAccount.Email.EndsWith(domain, StringComparison.OrdinalIgnoreCase)))
-                return BadRequest($"Email must be from an allowed domain: {string.Join(", ", allowedDomains)}");
+            if (!System.Text.RegularExpressions.Regex.IsMatch(
+                newAccount.Email,
+                @"^[^@\s]+@[^@\s]+\.com$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                return BadRequest("Email must follow the format example@domain.com.");
+            }
 
             // Validate password requirements
             var password = newAccount.PasswordHash;
@@ -126,6 +128,14 @@ namespace TaskManagement.Controllers
             _context.Accounts.Add(newAccount);
             await _context.SaveChangesAsync();
 
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = adminId,
+                Action = "AccountCreated",
+                NewValue = newAccount.Name,
+                Note = $"Account created by {admin.Name}, ({admin.Role})",
+                CreatedAt = DateTime.UtcNow
+            });
             return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, newAccount);
         }
 
@@ -169,12 +179,45 @@ namespace TaskManagement.Controllers
             if (existingAccount == null)
                 return NotFound();
 
-            _context.Accounts.Remove(existingAccount);
+            existingAccount.isActive = false;
+
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = adminId,
+                Action = "Account Deleted",
+                Note = $"Account deleted by {admin.Name}, ({admin.Role})",
+                CreatedAt = DateTime.UtcNow
+            });
+
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
-        
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> ReactivateAccount(int id, [FromQuery] int adminId)
+        {
+            var admin = await _context.Accounts.FindAsync(adminId);
+            if (admin == null || admin.Role != "Admin")
+                return StatusCode(403, "Access denied. Admins only.");
+
+            var existingAccount = _context.Accounts.Find(id);
+            if (existingAccount == null)
+                return NotFound();
+
+            existingAccount.isActive = true;
+
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = adminId,
+                Action = "Account Reactivated",
+                Note = $"Account Reactivated by {admin.Name}, ({admin.Role})",
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
         [HttpPost("UploadProfilePicture/{id}")]
         public async Task<IActionResult> UploadProfilePicture(int id, IFormFile file)
         {
