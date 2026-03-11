@@ -211,7 +211,7 @@ namespace TaskManagement.Controllers
 
                 var projectMemberCheck = await _context.ProjectMembers
                         .FirstOrDefaultAsync(m => m.ProjectId == dto.ProjectId && m.AccountId == creatorId && !m.IsDeleted);
-                var creatorRole = creator.Role != "Admin" ? projectMemberCheck?.Role ?? "Unknown" : "Admin";
+                var creatorRole = creator.Role == "Admin" ? "Admin" : projectMemberCheck?.Role;
 
                 // Auto set project status to Active (StatusId = 2)
                 var project = await _context.Projects.FindAsync(dto.ProjectId);
@@ -383,7 +383,7 @@ namespace TaskManagement.Controllers
 
                 var updaterProjectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == updaterId && !m.IsDeleted);
-                var updaterProjectRole = updater.Role == "Admin" ? "Admin" : updaterProjectMember?.Role ?? "Unknown";
+                var updaterProjectRole = updater.Role == "Admin" ? "Admin" : updaterProjectMember?.Role;
 
                 await _context.SaveChangesAsync();
 
@@ -492,7 +492,13 @@ namespace TaskManagement.Controllers
 
                 var deleterProjectMember = await _context.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == deleterId && !m.IsDeleted);
 
-                var deleterRole = deleter.Role == "Admin" ? "Admin" : deleterProjectMember?.Role ?? "Unknown";
+                var deleterRole = deleter.Role == "Admin" ? "Admin" : deleterProjectMember?.Role;
+
+                if (deleterRole != "Admin" &&
+                    deleterRole != "ProjectManager" &&
+                    deleterRole != "ScrumMaster" &&
+                    deleterRole != "ProjectManager-ScrumMaster")
+                    return StatusCode(403, "You do not have permission to delete tasks.");
 
                 await SoftDeleteTaskRecursive(id);
 
@@ -593,7 +599,7 @@ namespace TaskManagement.Controllers
                 var assignerProjectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById && !m.IsDeleted);
 
-                var assignerProjectRole = assigner.Role == "Admin" ? "Admin" : assignerProjectMember?.Role ?? "Unknown";
+                var assignerProjectRole = assigner.Role == "Admin" ? "Admin" : assignerProjectMember?.Role;
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -803,7 +809,7 @@ namespace TaskManagement.Controllers
 
                 var requesterProjectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId && !m.IsDeleted);
-                var requesterRole = requester.Role == "Admin" ? "Admin" : requesterProjectMember?.Role ?? "Unknown";
+                var requesterRole = requester.Role == "Admin" ? "Admin" : requesterProjectMember?.Role;
 
                 var restoredCount = await ReactivateTaskRecursive(taskId);
 
