@@ -1,20 +1,28 @@
-﻿using TaskManagement;
-using TaskManagement.Data;
-using TaskManagement.Models;
-using TaskManagement.Services;
-using Microsoft.AspNetCore.Authentication;
+﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using TaskManagement;
+using TaskManagement.Data;
+using TaskManagement.Models;
+using TaskManagement.Services;
 
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-
+builder.Services.AddRateLimiter(options =>
+{
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+    });
+});
 // Swagger configuration
 builder.Services.AddSwaggerGen(options =>
 {
@@ -69,25 +77,6 @@ builder.Services.AddDbContext<AccountDbContext>(options =>
 var jwtSettings = builder.Configuration.GetSection("Jwt");
 var key = Encoding.ASCII.GetBytes(jwtSettings["Key"]);
 
-//builder.Services.AddAuthentication(options =>
-//{
-//    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-//    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-//})
-//.AddJwtBearer(options =>
-//{
-//    options.RequireHttpsMetadata = false; // true in production
-//    options.SaveToken = true;
-//    options.TokenValidationParameters = new TokenValidationParameters
-//    {
-//        ValidateIssuer = true,
-//        ValidateAudience = true,
-//        ValidateIssuerSigningKey = true,
-//        ValidIssuer = jwtSettings["Issuer"],
-//        ValidAudience = jwtSettings["Audience"],
-//        IssuerSigningKey = new SymmetricSecurityKey(key)
-//    };
-//});
 builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
 
@@ -120,22 +109,6 @@ using (var scope = app.Services.CreateScope())
         // Don't throw - let the app continue without database
     }
 }
-/*app.Use(async (context, next) =>
-{
-    if (context.Request.Path.StartsWithSegments("/swagger"))
-    {
-        var swaggerKey = app.Configuration["SwaggerKey"];
-        string? providedKey = context.Request.Query["key"];
-
-        if (providedKey != swaggerKey)
-        {
-            context.Response.StatusCode = 401;
-            await context.Response.WriteAsync("Unauthorized. Access: /swagger?key=YOUR_KEY");
-            return;
-        }
-    }
-    await next();
-});*/
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>

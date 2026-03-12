@@ -11,13 +11,13 @@ namespace TaskManagement
 
         public async Task InvokeAsync(HttpContext context, AccountDbContext db)
         {
-            // Skip swagger and login/logout
             var path = context.Request.Path;
             if (path.StartsWithSegments("/swagger") ||
                 path.StartsWithSegments("/api/Auth/login") ||
-                path.StartsWithSegments("/api/Auth/logout") ||
-                path.StartsWithSegments("/api/Account/CreateAccount") ||
-                path.StartsWithSegments("/api/Auth/me"))
+                path.StartsWithSegments("/api/Auth/ForgotPassword") || 
+                path.StartsWithSegments("/api/Auth/VerifyOtp") ||      
+                path.StartsWithSegments("/api/Auth/ResetPassword"))   
+
             {
                 await _next(context);
                 return;

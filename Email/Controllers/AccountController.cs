@@ -1,30 +1,34 @@
-﻿using TaskManagement.Data;
-using TaskManagement.DTOs;
-using TaskManagement.Models;
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Runtime.CompilerServices;
+using System.Security.Principal;
 using System.Threading.Tasks;
+using TaskManagement.Data;
+using TaskManagement.DTOs;
+using TaskManagement.Models;
 
 namespace TaskManagement.Controllers
 {
     [Route("api/[controller]/[action]")]
     [ApiController]
-    public class AccountController(AccountDbContext context) : ControllerBase
+    public class AccountController : ControllerBase
     {
-        private readonly AccountDbContext _context = context;
+        private readonly AccountDbContext _context;
         private readonly PasswordHasher<Account> _passwordHasher = new PasswordHasher<Account>();
+        private readonly IConfiguration _config;
+        public AccountController(AccountDbContext context, IConfiguration config)
+        {
+            _context = context;
+            _config = config;
+        }
 
         [HttpGet]
-        public async Task<ActionResult<List<Account>>> GetAccountsv1([FromQuery] int adminId)
+        public async Task<ActionResult<List<Account>>> GetAccountsv1()
         {
-            var admin = await _context.Accounts.FindAsync(adminId);
-            if (admin == null || admin.Role != "Admin")
-                return StatusCode(403, "Access denied. Admins only.");
-
             try
             {
                 return Ok(await _context.Accounts.ToListAsync());
@@ -33,6 +37,35 @@ namespace TaskManagement.Controllers
             {
                 return BadRequest($"Internal server error: {ex.Message}");
             }
+        }
+
+        [HttpGet]
+        public async Task<ActionResult<Account>> GetAllUserRoleAccount()
+        {
+            try
+            {
+                var users = await _context.Accounts
+                    .Where(a => a.Role == "User" && a.isActive)
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Name,
+                        a.Email,
+                        a.Role,
+                        a.ProfilePicture
+                    })
+                    .ToListAsync();
+
+                if (!users.Any())
+                    return NotFound("No users found.");
+
+                return Ok(users);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+
         }
 
         [HttpGet("{id}")]
@@ -59,6 +92,35 @@ namespace TaskManagement.Controllers
             if (newAccount is null)
                 return BadRequest();
 
+            if (!System.Text.RegularExpressions.Regex.IsMatch(
+                newAccount.Email,
+                @"^[^@\s]+@[^@\s]+\.com$",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+            {
+                return BadRequest("Email must follow the format example@domain.com.");
+            }
+
+            // Validate password requirements
+            var password = newAccount.PasswordHash;
+            if (password.Length < 8)
+                return BadRequest("Password must be at least 8 characters.");
+            if (!password.Any(char.IsUpper))
+                return BadRequest("Password must contain at least one uppercase letter.");
+            if (!password.Any(char.IsLower))
+                return BadRequest("Password must contain at least one lowercase letter.");
+            if (!password.Any(char.IsDigit))
+                return BadRequest("Password must contain at least one number.");
+            if (!password.Any(ch => "!@#$%^&*()_+-=[]{}|;':\",./<>?".Contains(ch)))
+                return BadRequest("Password must contain at least one special character (!@#$%^&*...).");
+
+            
+
+            // check if email already exists
+            var emailExists = await _context.Accounts
+                .AnyAsync(a => a.Email.ToLower() == newAccount.Email.ToLower());
+            if (emailExists)
+                return BadRequest("Email already exists.");
+
             newAccount.PasswordHash = _passwordHasher.HashPassword(newAccount, newAccount.PasswordHash);
             newAccount.CreatedAt = DateTime.UtcNow;
             newAccount.UpdatedAt = DateTime.UtcNow;
@@ -66,6 +128,14 @@ namespace TaskManagement.Controllers
             _context.Accounts.Add(newAccount);
             await _context.SaveChangesAsync();
 
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = adminId,
+                Action = "AccountCreated",
+                NewValue = newAccount.Name,
+                Note = $"Account created by {admin.Name}, ({admin.Role})",
+                CreatedAt = DateTime.UtcNow
+            });
             return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, newAccount);
         }
 
@@ -109,12 +179,45 @@ namespace TaskManagement.Controllers
             if (existingAccount == null)
                 return NotFound();
 
-            _context.Accounts.Remove(existingAccount);
+            existingAccount.isActive = false;
+
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = adminId,
+                Action = "Account Deleted",
+                Note = $"Account deleted by {admin.Name}, ({admin.Role})",
+                CreatedAt = DateTime.UtcNow
+            });
+
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
-        // ✅ No admin check - anyone can upload their own profile picture
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> ReactivateAccount(int id, [FromQuery] int adminId)
+        {
+            var admin = await _context.Accounts.FindAsync(adminId);
+            if (admin == null || admin.Role != "Admin")
+                return StatusCode(403, "Access denied. Admins only.");
+
+            var existingAccount = _context.Accounts.Find(id);
+            if (existingAccount == null)
+                return NotFound();
+
+            existingAccount.isActive = true;
+
+            _context.TimeLogs.Add(new TimeLog
+            {
+                AccountId = adminId,
+                Action = "Account Reactivated",
+                Note = $"Account Reactivated by {admin.Name}, ({admin.Role})",
+                CreatedAt = DateTime.UtcNow
+            });
+
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
         [HttpPost("UploadProfilePicture/{id}")]
         public async Task<IActionResult> UploadProfilePicture(int id, IFormFile file)
         {

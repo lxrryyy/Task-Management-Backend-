@@ -7,5 +7,6 @@
         Task SendStatusChangedAsync(string toEmail, string taskTitle, string newStatus);
         Task SendDeadlineReminderAsync(string toEmail, string taskTitle, DateTime dueDate);
 
+        Task SendOtpAsync(string toEmail, string name, string otp);
     }
 }

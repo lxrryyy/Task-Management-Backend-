@@ -9,5 +9,7 @@
         public List<int> MemberIds { get; set; } = new List<int>();
         public bool IsAlsoScrumMaster { get; set; } = false; // for User: true if they want to be SM too
 
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
     }
 }
