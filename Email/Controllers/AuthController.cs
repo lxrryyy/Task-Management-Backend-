@@ -164,7 +164,7 @@ namespace TaskManagement.Controllers
                     return NotFound("No account found with that email.");
 
                 var existingOtps = await _context.OtpCodes
-                    .Where(o => o.Email == normalizedEmail && !o.IsUsed && o.ExpiresAt > DateTime.UtcNow)
+                    .Where(o => o.AccountId == account.Id && !o.IsUsed && o.ExpiresAt > DateTime.UtcNow)
                     .ToListAsync();
                 foreach (var old in existingOtps)
                     old.IsUsed = true;
@@ -173,7 +173,7 @@ namespace TaskManagement.Controllers
 
                 _context.OtpCodes.Add(new OtpCode
                 {
-                    Email = normalizedEmail,
+                    AccountId = account.Id,
                     Code = otp,
                     ExpiresAt = DateTime.UtcNow.AddMinutes(15),
                     IsUsed = false,
@@ -198,8 +198,14 @@ namespace TaskManagement.Controllers
             {
                 var normalizedEmail = request.Email.Trim().ToLowerInvariant();
 
+                var account = await _context.Accounts
+                    .SingleOrDefaultAsync(a => a.Email.ToLower() == normalizedEmail);
+
+                if (account == null)
+                    return NotFound("No account found with that email.");
+
                 var otpRecord = await _context.OtpCodes
-                    .Where(o => o.Email == normalizedEmail && o.Code == request.Code && !o.IsUsed)
+                    .Where(o => o.AccountId == account.Id && o.Code == request.Code && !o.IsUsed)
                     .OrderByDescending(o => o.CreatedAt)
                     .FirstOrDefaultAsync();
 
@@ -219,7 +225,7 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
-        [AllowAnonymous]
+
         [HttpPost("ResetPassword")]
         public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
         {
@@ -233,7 +239,7 @@ namespace TaskManagement.Controllers
                     return NotFound("Account not found.");
 
                 var verifiedOtp = await _context.OtpCodes
-                    .Where(o => o.Email == normalizedEmail && o.IsUsed)
+                    .Where(o => o.AccountId == account.Id && o.IsUsed)
                     .OrderByDescending(o => o.CreatedAt)
                     .FirstOrDefaultAsync();
 
