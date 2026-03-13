@@ -1,4 +1,4 @@
-﻿namespace TaskManagement.DTOs
+﻿namespace TaskManagement.DTOs.Account
 {
     public class LoginRequest
     {

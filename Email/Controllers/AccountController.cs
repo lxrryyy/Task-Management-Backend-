@@ -8,7 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Principal;
 using System.Threading.Tasks;
 using TaskManagement.Data;
-using TaskManagement.DTOs;
+using TaskManagement.DTOs.Account;
 using TaskManagement.Models;
 
 namespace TaskManagement.Controllers

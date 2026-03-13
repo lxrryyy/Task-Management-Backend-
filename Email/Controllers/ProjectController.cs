@@ -242,17 +242,17 @@ namespace TaskManagement.Controllers
                     }
                 }
 
-                await _context.SaveChangesAsync();
+                
                 _context.TimeLogs.Add(new TimeLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = creatorId,
-                    Action = "ProjectCreated",
+                    Action = "Project Created",
                     NewValue = project.Name,
                     Note = $"Project created by {creator.Name}"
                 });
-
+                await _context.SaveChangesAsync();
 
                 var pmAccount = await _context.Accounts.FindAsync(projectManagerId);
                 var smAccount = scrumMasterId.HasValue

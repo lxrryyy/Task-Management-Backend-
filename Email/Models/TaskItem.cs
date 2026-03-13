@@ -25,6 +25,10 @@ namespace TaskManagement.Models
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
         public bool IsDeleted { get; set; } = false;
+
+        [ForeignKey("ProjectId")]               // ← add this
+        public Project Project { get; set; } = null!;
+
         public ICollection<TaskAssignment> Assignments { get; set; } = new List<TaskAssignment>();
         public ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();
         public ICollection<TimeLog> TimeLogs { get; set; } = new List<TimeLog>();

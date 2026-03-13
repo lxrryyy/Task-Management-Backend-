@@ -1,15 +1,15 @@
-﻿using TaskManagement.Migrations;
-using TaskManagement.Models;
+﻿
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Migrations;
 using System.Diagnostics;
+using TaskManagement.Models;
 namespace TaskManagement.Data
 {
     public class AccountDbContext : DbContext
     {
         public AccountDbContext(DbContextOptions<AccountDbContext> options) : base(options) { }
         public DbSet<Account> Accounts { get; set; }
-        public DbSet<ApiToken> ApiTokens { get; set; }
         // Task Management
         public DbSet<TaskItem> Tasks { get; set; }
         public DbSet<TaskAssignment> TaskAssignments { get; set; }
@@ -24,16 +24,29 @@ namespace TaskManagement.Data
         public DbSet<TaskPriority> TaskPriorities { get; set; }
         public DbSet<ProjectStatus> ProjectStatuses { get; set; }
         public DbSet<OtpCode> OtpCodes { get; set; }
+        public DbSet<StickyNote> StickyNotes { get; set; }
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
-
+            var hasher = new PasswordHasher<Account>();
+            var admin = new Account
+            {
+                Id = 1,
+                Name = "Admin",
+                Email = "admin@admin.com",
+                Role = "Admin",
+                isActive = true,
+                CreatedAt = new DateTime(2026, 1, 1),
+                UpdatedAt = new DateTime(2026, 1, 1)
+            };
+            admin.PasswordHash = hasher.HashPassword(admin, "Admin@123");
+            modelBuilder.Entity<Account>().HasData(admin);
             // Task relationships
             modelBuilder.Entity<TaskAssignment>()
                 .HasOne<TaskItem>(a => a.Task)
                 .WithMany(t => t.Assignments)
                 .HasForeignKey(a => a.TaskId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.NoAction);
 
             modelBuilder.Entity<TaskComment>()
                 .HasOne<TaskItem>()
@@ -52,14 +65,14 @@ namespace TaskManagement.Data
                 .HasOne<TaskItem>()
                 .WithMany(t => t.SubTasks)
                 .HasForeignKey(t => t.ParentTaskId)
-                .OnDelete(DeleteBehavior.Restrict); 
+                .OnDelete(DeleteBehavior.Restrict);
 
             // Project → Tasks
             modelBuilder.Entity<TaskItem>()
-                .HasOne<Project>()
+                .HasOne(t => t.Project)       
                 .WithMany(p => p.Tasks)
                 .HasForeignKey(t => t.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade); 
+                .OnDelete(DeleteBehavior.Cascade);
 
             // Project → Members
             modelBuilder.Entity<ProjectMember>()

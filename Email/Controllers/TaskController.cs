@@ -442,8 +442,14 @@ namespace TaskManagement.Controllers
                 if (newStatus == null)
                     return BadRequest("Invalid StatusId.");
 
-                if (dto.StatusId == 4 && !isProjectManager && !isAdmin)
-                    return StatusCode(403, "Only the Project Manager can mark a task as Completed.");
+                if (dto.StatusId == 4)
+                {
+                    if (task.ParentTaskId == null && !isProjectManager && !isAdmin)
+                        return StatusCode(403, "Only the Project Manager or Admin can mark a root task as Completed.");
+
+                    if (task.ParentTaskId != null && !isProjectManager && !isAdmin && !isAssigned)
+                        return StatusCode(403, "Only an assigned member, Project Manager, or Admin can mark a subtask as Completed.");
+                }
 
                 if (dto.StatusId == 3 && !isAssigned && !isProjectManager && !isAdmin)
                     return StatusCode(403, "Only an assigned member can submit this task for review.");

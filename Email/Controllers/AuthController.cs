@@ -11,7 +11,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using TaskManagement.Data;
-using TaskManagement.DTOs;
+using TaskManagement.DTOs.Account;
 using TaskManagement.DTOs.Auth;
 using TaskManagement.Models;
 using TaskManagement.Services;
@@ -54,18 +54,12 @@ namespace TaskManagement.Controllers
 
                 var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
 
-                var expiry = request.RememberMe ? DateTime.UtcNow.AddDays(7) : DateTime.UtcNow.AddHours(8);
+                var expiry = request.RememberMe ? DateTime.UtcNow.AddDays(7) : DateTime.UtcNow.AddHours(1);
 
-                var apiToken = new ApiToken
-                {
-                    Token = token,
-                    AccountId = account.Id,
-                    Revoked = false,
-                    CreatedAt = DateTime.UtcNow,
-                    ExpiresAt = expiry
-                };
+                account.ApiToken = token;
+                account.TokenExpiresAt = expiry;
+                account.UpdatedAt = DateTime.UtcNow;
 
-                _context.ApiTokens.Add(apiToken);
                 await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -97,13 +91,13 @@ namespace TaskManagement.Controllers
 
                 var token = authHeader.Substring("Bearer ".Length).Trim();
 
-                var apiToken = await _context.ApiTokens
-                    .SingleOrDefaultAsync(t => t.Token == token && !t.Revoked);
+                var account = await _context.Accounts
+                    .SingleOrDefaultAsync(a => a.ApiToken == token);
 
-                if (apiToken == null)
-                    return NotFound("Token not found or already revoked.");
+                account.ApiToken = null;
+                account.TokenExpiresAt = null;
+                account.UpdatedAt = DateTime.UtcNow;
 
-                apiToken.Revoked = true;
                 await _context.SaveChangesAsync();
 
                 return Ok("Logged out successfully.");
@@ -124,14 +118,19 @@ namespace TaskManagement.Controllers
 
                 var token = authHeader.Substring("Bearer ".Length).Trim();
 
-                var apiToken = await _context.ApiTokens
-                    .Include(t => t.Account)
-                    .SingleOrDefaultAsync(t => t.Token == token && !t.Revoked && t.ExpiresAt > DateTime.UtcNow);
+                var account = await _context.Accounts
+                    .SingleOrDefaultAsync(a => a.ApiToken == token);
 
-                if (apiToken == null)
-                    return Unauthorized("Invalid or expired token.");
+                if (account == null)
+                    return Unauthorized("Invalid token.");
 
-                var account = apiToken.Account;
+                if (account.TokenExpiresAt == null || account.TokenExpiresAt < DateTime.UtcNow)
+                {
+                    account.ApiToken = null;
+                    account.TokenExpiresAt = null;
+                    await _context.SaveChangesAsync();
+                    return Unauthorized("Token has expired. Please log in again.");
+                }
 
                 return Ok(new
                 {
