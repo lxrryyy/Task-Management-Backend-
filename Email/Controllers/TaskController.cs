@@ -1,6 +1,5 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography.Pkcs;
 using TaskManagement.Data;
 using TaskManagement.DTOs.Task;
 using TaskManagement.Models;
@@ -42,6 +41,7 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
         [HttpGet("GetAllTasksStatuses")]
         public async Task<IActionResult> GetAllTasksStatuses()
         {
@@ -66,7 +66,7 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
-        // GET all tasks
+
         [HttpGet("GetAllTasks")]
         public async Task<IActionResult> GetAllTasks()
         {
@@ -79,10 +79,10 @@ namespace TaskManagement.Controllers
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        StatusId = t.StatusId,           
-                        StatusName = t.Status.Name,      
-                        PriorityId = t.PriorityId,       
-                        PriorityName = t.Priority.Name,  
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
                         ParentTaskId = t.ParentTaskId,
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
@@ -104,7 +104,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET task by id
         [HttpGet("GetTaskById/{id}")]
         public async Task<IActionResult> GetTaskById(int id)
         {
@@ -117,10 +116,10 @@ namespace TaskManagement.Controllers
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        StatusId = t.StatusId,           
-                        StatusName = t.Status.Name,      
-                        PriorityId = t.PriorityId,       
-                        PriorityName = t.Priority.Name,  
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
                         CreatorId = t.CreatorId,
                         ProjectId = t.ProjectId,
                         ParentTaskId = t.ParentTaskId,
@@ -145,7 +144,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // POST create task
         [HttpPost("CreateTask")]
         public async Task<IActionResult> CreateTask([FromBody] CreateTaskDTO dto, [FromQuery] int creatorId)
         {
@@ -167,6 +165,7 @@ namespace TaskManagement.Controllers
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can create tasks.");
                 }
+
                 if (dto.StartDate == default)
                     return BadRequest("Start date is required.");
                 if (dto.DueDate == default)
@@ -174,15 +173,19 @@ namespace TaskManagement.Controllers
                 if (dto.DueDate <= dto.StartDate)
                     return BadRequest("End date must be after start date.");
 
-                // Validate story points
-                if (dto.StoryPoints.HasValue && (dto.StoryPoints < 1 || dto.StoryPoints > 5))
-                    return BadRequest("Story points must be between 1 and 5.");
+                var project = await _context.Projects.FindAsync(dto.ProjectId);
+                if (project == null)
+                    return NotFound("Project not found.");
+                if (dto.DueDate > project.EndDate)
+                    return BadRequest($"Task due date cannot exceed the project end date ({project.EndDate:yyyy-MM-dd}).");
 
-                // Validate duplicate assigneeIds
+                var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
+                if (dto.StoryPoints.HasValue && !validStoryPoints.Contains(dto.StoryPoints.Value))
+                    return BadRequest("Story points must be a Fibonacci number (1, 2, 3, 5, 8, 13, 21).");
+
                 if (dto.AssigneeIds.Distinct().Count() != dto.AssigneeIds.Count)
                     return BadRequest("Duplicate assignee IDs are not allowed.");
 
-                // Validate PriorityId if provided
                 if (dto.PriorityId.HasValue)
                 {
                     var priorityExists = await _context.TaskPriorities.AnyAsync(p => p.Id == dto.PriorityId.Value);
@@ -194,8 +197,8 @@ namespace TaskManagement.Controllers
                 {
                     Title = dto.Title,
                     Description = dto.Description,
-                    PriorityId = dto.PriorityId, 
-                    StatusId = 1,                  
+                    PriorityId = dto.PriorityId,
+                    StatusId = 1,
                     StartDate = dto.StartDate,
                     DueDate = dto.DueDate,
                     StoryPoints = dto.StoryPoints,
@@ -210,14 +213,12 @@ namespace TaskManagement.Controllers
                 await _context.SaveChangesAsync();
 
                 var projectMemberCheck = await _context.ProjectMembers
-                        .FirstOrDefaultAsync(m => m.ProjectId == dto.ProjectId && m.AccountId == creatorId && !m.IsDeleted);
+                    .FirstOrDefaultAsync(m => m.ProjectId == dto.ProjectId && m.AccountId == creatorId && !m.IsDeleted);
                 var creatorRole = creator.Role == "Admin" ? "Admin" : projectMemberCheck?.Role;
 
-                // Auto set project status to Active (StatusId = 2)
-                var project = await _context.Projects.FindAsync(dto.ProjectId);
-                if (project != null && project.StatusId == 1) // 1 = Not Started
+                if (project.StatusId == 1)
                 {
-                    project.StatusId = 2; // 2 = Active
+                    project.StatusId = 2;
                     project.UpdatedAt = DateTime.UtcNow;
 
                     _context.TimeLogs.Add(new TimeLog
@@ -232,7 +233,6 @@ namespace TaskManagement.Controllers
                     });
                 }
 
-                // Assign users
                 if (dto.AssigneeIds.Any())
                 {
                     foreach (var accountId in dto.AssigneeIds)
@@ -245,10 +245,8 @@ namespace TaskManagement.Controllers
                             AssignedAt = DateTime.UtcNow
                         });
                     }
-                    await _context.SaveChangesAsync();
                 }
 
-                // Time log
                 _context.TimeLogs.Add(new TimeLog
                 {
                     ProjectId = task.ProjectId,
@@ -286,7 +284,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // PATCH update task
         [HttpPatch("UpdateTask/{id}")]
         public async Task<IActionResult> UpdateTask(int id, [FromBody] UpdateTaskDTO dto, [FromQuery] int updaterId)
         {
@@ -313,9 +310,22 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can update tasks.");
                 }
 
-                // Validate story points
-                if (dto.StoryPoints.HasValue && (dto.StoryPoints < 1 || dto.StoryPoints > 5))
-                    return BadRequest("Story points must be between 1 and 5.");
+                var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
+                if (dto.StoryPoints.HasValue && !validStoryPoints.Contains(dto.StoryPoints.Value))
+                    return BadRequest("Story points must be a Fibonacci number (1, 2, 3, 5, 8, 13, 21).");
+
+                if (dto.StartDate == default)
+                    return BadRequest("Start date is required.");
+                if (dto.DueDate == default)
+                    return BadRequest("End date is required.");
+                if (dto.DueDate <= dto.StartDate)
+                    return BadRequest("End date must be after start date.");
+
+                var taskProject = await _context.Projects.FindAsync(task.ProjectId);
+                if (taskProject == null)
+                    return NotFound("Project not found.");
+                if (dto.DueDate > taskProject.EndDate)
+                    return BadRequest($"Task due date cannot exceed the project end date ({taskProject.EndDate:yyyy-MM-dd}).");
 
                 var changes = new List<string>();
 
@@ -329,7 +339,6 @@ namespace TaskManagement.Controllers
                     changes.Add($"Description updated");
                     task.Description = dto.Description;
                 }
-
                 if (dto.StatusId.HasValue && dto.StatusId != task.StatusId)
                 {
                     var statusExists = await _context.TaskStatuses.AnyAsync(s => s.Id == dto.StatusId.Value);
@@ -339,7 +348,6 @@ namespace TaskManagement.Controllers
                     changes.Add($"StatusId: {task.StatusId} → {dto.StatusId}");
                     task.StatusId = dto.StatusId.Value;
                 }
-              
                 if (dto.PriorityId.HasValue && dto.PriorityId != task.PriorityId)
                 {
                     var priorityExists = await _context.TaskPriorities.AnyAsync(p => p.Id == dto.PriorityId.Value);
@@ -349,7 +357,6 @@ namespace TaskManagement.Controllers
                     changes.Add($"PriorityId: {task.PriorityId} → {dto.PriorityId}");
                     task.PriorityId = dto.PriorityId;
                 }
-
                 if (dto.StartDate != null && dto.StartDate != task.StartDate)
                 {
                     changes.Add($"StartDate: {task.StartDate} → {dto.StartDate}");
@@ -360,14 +367,6 @@ namespace TaskManagement.Controllers
                     changes.Add($"DueDate: {task.DueDate} → {dto.DueDate}");
                     task.DueDate = dto.DueDate;
                 }
-
-                if (dto.StartDate == default)
-                    return BadRequest("Start date is required.");
-                if (dto.DueDate == default)
-                    return BadRequest("End date is required.");
-                if (dto.DueDate <= dto.StartDate)
-                    return BadRequest("End date must be after start date.");
-
                 if (dto.StoryPoints.HasValue && dto.StoryPoints != task.StoryPoints)
                 {
                     changes.Add($"StoryPoints: {task.StoryPoints} → {dto.StoryPoints}");
@@ -385,8 +384,6 @@ namespace TaskManagement.Controllers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == updaterId && !m.IsDeleted);
                 var updaterProjectRole = updater.Role == "Admin" ? "Admin" : updaterProjectMember?.Role;
 
-                await _context.SaveChangesAsync();
-
                 if (changes.Any())
                 {
                     _context.TimeLogs.Add(new TimeLog
@@ -398,9 +395,9 @@ namespace TaskManagement.Controllers
                         NewValue = string.Join(", ", changes),
                         Note = $"Task updated by {updater.Name} ({updaterProjectRole})"
                     });
-                    await _context.SaveChangesAsync();
                 }
 
+                await _context.SaveChangesAsync();
                 return NoContent();
             }
             catch (Exception ex)
@@ -409,7 +406,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // PATCH update task status (for assigned members)
         [HttpPatch("UpdateTaskStatus/{id}")]
         public async Task<IActionResult> UpdateTaskStatus(int id, [FromQuery] int requesterId, [FromBody] UpdateTaskStatusDTO dto)
         {
@@ -432,8 +428,7 @@ namespace TaskManagement.Controllers
                 var isAdmin = requester.Role == "Admin";
                 var isProjectManager = projectMember?.Role == "ProjectManager" ||
                                        projectMember?.Role == "ProjectManager-ScrumMaster";
-                var isPrivileged = isProjectManager ||
-                                   projectMember?.Role == "ScrumMaster";
+                var isPrivileged = isProjectManager || projectMember?.Role == "ScrumMaster";
 
                 if (!isAdmin && !isPrivileged && !isAssigned)
                     return StatusCode(403, "You are not assigned to this task.");
@@ -496,8 +491,8 @@ namespace TaskManagement.Controllers
                 if (deleter == null)
                     return NotFound("Deleter account not found.");
 
-                var deleterProjectMember = await _context.ProjectMembers.FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == deleterId && !m.IsDeleted);
-
+                var deleterProjectMember = await _context.ProjectMembers
+                    .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == deleterId && !m.IsDeleted);
                 var deleterRole = deleter.Role == "Admin" ? "Admin" : deleterProjectMember?.Role;
 
                 if (deleterRole != "Admin" &&
@@ -553,7 +548,6 @@ namespace TaskManagement.Controllers
                 await SoftDeleteTaskRecursive(subtask.Id);
         }
 
-        // PATCH assign task
         [HttpPatch("AssignTask/{id}")]
         public async Task<IActionResult> AssignTask(int id, [FromBody] AssignTaskDTO dto)
         {
@@ -602,9 +596,9 @@ namespace TaskManagement.Controllers
                 }
 
                 task.UpdatedAt = DateTime.UtcNow;
+
                 var assignerProjectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById && !m.IsDeleted);
-
                 var assignerProjectRole = assigner.Role == "Admin" ? "Admin" : assignerProjectMember?.Role;
 
                 _context.TimeLogs.Add(new TimeLog
@@ -626,7 +620,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET tasks by assignee
         [HttpGet("GetTasksByAssignee/{accountId}")]
         public async Task<IActionResult> GetTasksByAssignee(int accountId)
         {
@@ -639,10 +632,10 @@ namespace TaskManagement.Controllers
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        StatusId = t.StatusId,           
-                        StatusName = t.Status.Name,      
-                        PriorityId = t.PriorityId,       
-                        PriorityName = t.Priority.Name,  
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
@@ -656,9 +649,7 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
-                if (!tasks.Any())
-                    return NotFound("No tasks found for this account.");
-
+                // ✅ Return empty list instead of 404
                 return Ok(tasks);
             }
             catch (Exception ex)
@@ -667,7 +658,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET tasks by project with role-based visibility
         [HttpGet("GetTasksByProject/{projectId}")]
         public async Task<IActionResult> GetTasksByProject(int projectId, [FromQuery] int requesterId)
         {
@@ -702,10 +692,10 @@ namespace TaskManagement.Controllers
                         Id = t.Id,
                         Title = t.Title,
                         Description = t.Description,
-                        StatusId = t.StatusId,           
-                        StatusName = t.Status.Name,      
-                        PriorityId = t.PriorityId,       
-                        PriorityName = t.Priority.Name,  
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
                         CreatorId = t.CreatorId,
                         CreatorName = t.Creator.Name,
                         StoryPoints = t.StoryPoints,
@@ -727,7 +717,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        //deleted tasks by project
         [HttpGet("GetDeletedTasksByProject/{projectId}")]
         public async Task<IActionResult> GetDeletedTasksByProject(int projectId)
         {
@@ -751,7 +740,6 @@ namespace TaskManagement.Controllers
                         StartDate = t.StartDate,
                         DueDate = t.DueDate,
                         UpdatedAt = t.UpdatedAt
-
                     })
                     .ToListAsync();
 
@@ -763,7 +751,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // GET deleted subtasks by parent task
         [HttpGet("GetDeletedSubtasks/{parentTaskId}")]
         public async Task<IActionResult> GetDeletedSubtasks(int parentTaskId)
         {
@@ -799,7 +786,6 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // PATCH reactivate task and  subtasks
         [HttpPatch("ReactivateTask/{taskId}")]
         public async Task<IActionResult> ReactivateTask(int taskId, [FromQuery] int requesterId)
         {
@@ -820,13 +806,13 @@ namespace TaskManagement.Controllers
                 var restoredCount = await ReactivateTaskRecursive(taskId);
 
                 _context.TimeLogs.Add(new TimeLog
-                {  
+                {
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
                     Action = "TaskReactivated",
                     NewValue = task.Title,
-                    Note = $"Task and all subtasks reactivated {requester.Name} ({requesterRole})"
+                    Note = $"Task and all subtasks reactivated by {requester.Name} ({requesterRole})"
                 });
 
                 await _context.SaveChangesAsync();
@@ -854,6 +840,7 @@ namespace TaskManagement.Controllers
             var assignments = await _context.TaskAssignments
                 .Where(a => a.TaskId == taskId && a.IsDeleted)
                 .ToListAsync();
+
             foreach (var assignment in assignments)
             {
                 assignment.IsDeleted = false;
