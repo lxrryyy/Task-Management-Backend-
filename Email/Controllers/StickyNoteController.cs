@@ -12,7 +12,8 @@ namespace TaskManagement.Controllers
     public class StickyNoteController : ControllerBase
     {
         private readonly AccountDbContext _context;
-
+        private static DateTime PhTime =>
+         TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public StickyNoteController(AccountDbContext context)
         {
             _context = context;
@@ -99,8 +100,8 @@ namespace TaskManagement.Controllers
                     AccountId = accountId,
                     Content = dto.Content,
                     IsPinned = false,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime,
+                    UpdatedAt = PhTime
                 };
 
                 _context.StickyNotes.Add(note);
@@ -144,7 +145,7 @@ namespace TaskManagement.Controllers
                 if (dto.IsPinned.HasValue)
                     note.IsPinned = dto.IsPinned.Value;
 
-                note.UpdatedAt = DateTime.UtcNow;
+                note.UpdatedAt = PhTime;
 
                 await _context.SaveChangesAsync();
 
@@ -178,8 +179,8 @@ namespace TaskManagement.Controllers
                     return NotFound("Note not found.");
 
                 note.IsDeleted = true;
-                note.DeletedAt = DateTime.UtcNow;
-                note.UpdatedAt = DateTime.UtcNow;
+                note.DeletedAt = PhTime;
+                note.UpdatedAt = PhTime;
 
                 await _context.SaveChangesAsync();
 

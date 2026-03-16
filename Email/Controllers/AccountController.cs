@@ -20,7 +20,9 @@ namespace TaskManagement.Controllers
         private readonly AccountDbContext _context;
         private readonly PasswordHasher<Account> _passwordHasher = new PasswordHasher<Account>();
         private readonly IConfiguration _config;
-        public AccountController(AccountDbContext context, IConfiguration config)
+		private static DateTime PhTime =>
+        	TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+		public AccountController(AccountDbContext context, IConfiguration config)
         {
             _context = context;
             _config = config;
@@ -122,8 +124,8 @@ namespace TaskManagement.Controllers
                 return BadRequest("Email already exists.");
 
             newAccount.PasswordHash = _passwordHasher.HashPassword(newAccount, newAccount.PasswordHash);
-            newAccount.CreatedAt = DateTime.UtcNow;
-            newAccount.UpdatedAt = DateTime.UtcNow;
+            newAccount.CreatedAt = PhTime;
+            newAccount.UpdatedAt = PhTime;
 
             _context.Accounts.Add(newAccount);
             await _context.SaveChangesAsync();
@@ -134,7 +136,7 @@ namespace TaskManagement.Controllers
                 Action = "AccountCreated",
                 NewValue = newAccount.Name,
                 Note = $"Account created by {admin.Name}, ({admin.Role})",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = PhTime
             });
             return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, newAccount);
         }
@@ -163,7 +165,7 @@ namespace TaskManagement.Controllers
             if (updatedAccount.ProfilePicture != null)
                 existingAccount.ProfilePicture = updatedAccount.ProfilePicture;
 
-            existingAccount.UpdatedAt = DateTime.UtcNow;
+            existingAccount.UpdatedAt = PhTime;
             await _context.SaveChangesAsync();
             return NoContent();
         }
@@ -186,7 +188,7 @@ namespace TaskManagement.Controllers
                 AccountId = adminId,
                 Action = "Account Deleted",
                 Note = $"Account deleted by {admin.Name}, ({admin.Role})",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = PhTime
             });
 
             await _context.SaveChangesAsync();
@@ -211,7 +213,7 @@ namespace TaskManagement.Controllers
                 AccountId = adminId,
                 Action = "Account Reactivated",
                 Note = $"Account Reactivated by {admin.Name}, ({admin.Role})",
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = PhTime
             });
 
             await _context.SaveChangesAsync();
@@ -246,7 +248,7 @@ namespace TaskManagement.Controllers
             }
 
             account.ProfilePicture = $"/uploads/profiles/{fileName}";
-            account.UpdatedAt = DateTime.UtcNow;
+            account.UpdatedAt = PhTime;
             await _context.SaveChangesAsync();
 
             return Ok(new { profilePicture = account.ProfilePicture });

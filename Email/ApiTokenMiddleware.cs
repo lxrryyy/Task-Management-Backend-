@@ -6,8 +6,8 @@ namespace TaskManagement
     public class ApiTokenMiddleware
     {
         private readonly RequestDelegate _next;
-
-        public ApiTokenMiddleware(RequestDelegate next) => _next = next;
+		private static DateTime PhTime => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+		public ApiTokenMiddleware(RequestDelegate next) => _next = next;
 
         public async Task InvokeAsync(HttpContext context, AccountDbContext db)
         {
@@ -45,7 +45,7 @@ namespace TaskManagement
                 return;
             }
 
-            if (account.TokenExpiresAt == null || account.TokenExpiresAt < DateTime.UtcNow)
+            if (account.TokenExpiresAt == null || account.TokenExpiresAt < PhTime)
             {
                 account.ApiToken = null;
                 account.TokenExpiresAt = null;

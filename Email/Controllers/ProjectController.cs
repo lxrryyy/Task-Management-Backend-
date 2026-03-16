@@ -15,6 +15,8 @@ namespace TaskManagement.Controllers
     public class ProjectController : ControllerBase
     {
         private readonly AccountDbContext _context;
+        private static DateTime PhTime =>
+             TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public ProjectController(AccountDbContext context)
         {
             _context = context;
@@ -143,13 +145,21 @@ namespace TaskManagement.Controllers
                         return BadRequest($"Account with ID {dto.ProjectManagerId} does not exist.");
 
                     projectManagerId = dto.ProjectManagerId.Value;
-                    scrumMasterId = dto.ScrumMasterId;
-
-                    if (dto.ScrumMasterId.HasValue)
+                    if (dto.IsAlsoScrumMaster)
+                    {
+                        scrumMasterId = projectManagerId;  // PM is also SM
+                    }
+                    else if (dto.ScrumMasterId.HasValue)
                     {
                         var smExists = await _context.Accounts.AnyAsync(a => a.Id == dto.ScrumMasterId.Value);
                         if (!smExists)
                             return BadRequest($"Account with ID {dto.ScrumMasterId} does not exist.");
+
+                        scrumMasterId = dto.ScrumMasterId.Value;
+                    }
+                    else
+                    {
+                        scrumMasterId = null;  // no SM assigned
                     }
                 }
                 else
@@ -159,7 +169,6 @@ namespace TaskManagement.Controllers
 
                     if (!dto.IsAlsoScrumMaster && dto.ScrumMasterId != null && dto.ScrumMasterId != creatorId)
                     {
-                        // 
                         var smExists = await _context.Accounts.AnyAsync(a => a.Id == dto.ScrumMasterId.Value);
                         if (!smExists)
                             return BadRequest($"Account with ID {dto.ScrumMasterId} does not exist.");
@@ -189,8 +198,8 @@ namespace TaskManagement.Controllers
                     StatusId = 1, // Not Started, then Active when PM/SM adds first task
                     StartDate = dto.StartDate,
                     EndDate = dto.EndDate,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime,
+                    UpdatedAt = PhTime
                 };
 
                 _context.Projects.Add(project);
@@ -205,7 +214,7 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     AccountId = projectManagerId,
                     Role = pmRole,
-                    JoinedAt = DateTime.UtcNow
+                    JoinedAt = PhTime
                 });
 
                 if (scrumMasterId != null && scrumMasterId != projectManagerId)
@@ -215,7 +224,7 @@ namespace TaskManagement.Controllers
                         ProjectId = project.Id,
                         AccountId = scrumMasterId.Value,
                         Role = "ScrumMaster",
-                        JoinedAt = DateTime.UtcNow
+                        JoinedAt = PhTime
                     });
                 }
 
@@ -237,7 +246,7 @@ namespace TaskManagement.Controllers
                             ProjectId = project.Id,
                             AccountId = memberId,
                             Role = "Member",
-                            JoinedAt = DateTime.UtcNow
+                            JoinedAt = PhTime
                         });
                     }
                 }
@@ -350,7 +359,7 @@ namespace TaskManagement.Controllers
                     if (oldPm != null)
                     {
                         oldPm.IsDeleted = true;
-                        oldPm.DeletedAt = DateTime.UtcNow;
+                        oldPm.DeletedAt = PhTime;
                     }
 
                     var newPm = await _context.ProjectMembers
@@ -363,7 +372,7 @@ namespace TaskManagement.Controllers
                             ProjectId = projectId,
                             AccountId = dto.ProjectManagerId.Value,
                             Role = "ProjectManager",
-                            JoinedAt = DateTime.UtcNow
+                            JoinedAt = PhTime
                         });
                     }
                     else
@@ -391,7 +400,7 @@ namespace TaskManagement.Controllers
                             if (oldSm.Role == "ScrumMaster")
                             {
                                 oldSm.IsDeleted = true;
-                                oldSm.DeletedAt = DateTime.UtcNow;
+                                oldSm.DeletedAt = PhTime;
                             }
                             else if (oldSm.Role == "ProjectManager-ScrumMaster")
                                 oldSm.Role = "ProjectManager";
@@ -421,7 +430,7 @@ namespace TaskManagement.Controllers
                                 ProjectId = projectId,
                                 AccountId = dto.ScrumMasterId.Value,
                                 Role = "ScrumMaster",
-                                JoinedAt = DateTime.UtcNow
+                                JoinedAt = PhTime
                             });
                         }
                     }
@@ -449,7 +458,7 @@ namespace TaskManagement.Controllers
                     foreach (var m in toRemove)
                     {
                         m.IsDeleted = true;
-                        m.DeletedAt = DateTime.UtcNow;
+                        m.DeletedAt = PhTime;
                     }
 
                     foreach (var memberId in dto.AssigneeIds.Distinct())
@@ -470,7 +479,7 @@ namespace TaskManagement.Controllers
                                 ProjectId = projectId,
                                 AccountId = memberId,
                                 Role = "Member",
-                                JoinedAt = DateTime.UtcNow
+                                JoinedAt = PhTime
                             });
                         }
                         else if (existingMember.IsDeleted)
@@ -499,7 +508,7 @@ namespace TaskManagement.Controllers
                     project.EndDate = dto.EndDate.Value;
                 }
 
-                project.UpdatedAt = DateTime.UtcNow;
+                project.UpdatedAt = PhTime;
 
                 var requesterRole = requester.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
 
@@ -720,8 +729,8 @@ namespace TaskManagement.Controllers
                     return NotFound("Project not found.");
 
                 project.IsDeleted = true;
-                project.DeletedAt = DateTime.UtcNow;
-                project.UpdatedAt = DateTime.UtcNow;
+                project.DeletedAt = PhTime;
+                project.UpdatedAt = PhTime;
 
                 var members = await _context.ProjectMembers
                     .Where(m => m.ProjectId == id && !m.IsDeleted)
@@ -729,7 +738,7 @@ namespace TaskManagement.Controllers
                 foreach (var member in members)
                 {
                     member.IsDeleted = true;
-                    member.DeletedAt = DateTime.UtcNow;
+                    member.DeletedAt = PhTime;
                 }
 
                 var tasks = await _context.Tasks
@@ -739,7 +748,7 @@ namespace TaskManagement.Controllers
                 foreach (var task in tasks)
                 {
                     task.IsDeleted = true;
-                    task.UpdatedAt = DateTime.UtcNow;
+                    task.UpdatedAt = PhTime;
 
                     var assignments = await _context.TaskAssignments
                         .Where(a => a.TaskId == task.Id && !a.IsDeleted)
@@ -748,7 +757,7 @@ namespace TaskManagement.Controllers
                     foreach (var assignment in assignments)
                     {
                         assignment.IsDeleted = true;
-                        assignment.DeletedAt = DateTime.UtcNow;
+                        assignment.DeletedAt = PhTime;
                     }
                 }
                
@@ -850,7 +859,7 @@ namespace TaskManagement.Controllers
 
                 project.IsDeleted = false;
                 project.DeletedAt = null;
-                project.UpdatedAt = DateTime.UtcNow;
+                project.UpdatedAt = PhTime;
 
                 var members = await _context.ProjectMembers
                     .Where(m => m.ProjectId == projectId && m.IsDeleted)
@@ -867,7 +876,7 @@ namespace TaskManagement.Controllers
                 foreach (var task in tasks)
                 {
                     task.IsDeleted = false;
-                    task.UpdatedAt = DateTime.UtcNow;
+                    task.UpdatedAt = PhTime;
 
                     var assignments = await _context.TaskAssignments
                         .Where(a => a.TaskId == task.Id && a.IsDeleted)

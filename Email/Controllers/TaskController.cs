@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System;
 using TaskManagement.Data;
 using TaskManagement.DTOs.Task;
+using TaskManagement.Helpers;
 using TaskManagement.Models;
 
 namespace TaskManagement.Controllers
@@ -11,7 +13,8 @@ namespace TaskManagement.Controllers
     public class TaskController : ControllerBase
     {
         private readonly AccountDbContext _context;
-
+        private static DateTime PhTime =>
+            TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public TaskController(AccountDbContext context)
         {
             _context = context;
@@ -144,6 +147,26 @@ namespace TaskManagement.Controllers
             }
         }
 
+        [HttpGet("CalculateDueDate")]
+        public IActionResult CalculateDueDate([FromQuery] DateTime startDate, [FromQuery] int storyPoints)
+        {
+            var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
+            if (!validStoryPoints.Contains(storyPoints))
+                return BadRequest("Story points must be a Fibonacci number (1, 2, 3, 5, 8, 13, 21).");
+
+            if (startDate == default)
+                return BadRequest("Start date is required.");
+
+            var dueDate = BusinessDayHelper.CalculateDueDateFromStoryPoints(startDate, storyPoints);
+
+            return Ok(new
+            {
+                startDate = startDate,
+                storyPoints = storyPoints,
+                dueDate = dueDate
+            });
+        }
+
         [HttpPost("CreateTask")]
         public async Task<IActionResult> CreateTask([FromBody] CreateTaskDTO dto, [FromQuery] int creatorId)
         {
@@ -168,23 +191,42 @@ namespace TaskManagement.Controllers
 
                 if (dto.StartDate == default)
                     return BadRequest("Start date is required.");
-                if (dto.DueDate == default)
-                    return BadRequest("End date is required.");
-                if (dto.DueDate <= dto.StartDate)
-                    return BadRequest("End date must be after start date.");
+
+                if (!dto.StoryPoints.HasValue)
+                    return BadRequest("Story points are required to calculate the due date.");
+
+                var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
+                if (!validStoryPoints.Contains(dto.StoryPoints.Value))
+                    return BadRequest("Story points must be a Fibonacci number (1, 2, 3, 5, 8, 13, 21).");
+
+                // Auto-calculate DueDate 
+                var calculatedDueDate = BusinessDayHelper.CalculateDueDateFromStoryPoints(
+                    dto.StartDate,
+                    dto.StoryPoints.Value
+                );
 
                 var project = await _context.Projects.FindAsync(dto.ProjectId);
                 if (project == null)
                     return NotFound("Project not found.");
-                if (dto.DueDate > project.EndDate)
-                    return BadRequest($"Task due date cannot exceed the project end date ({project.EndDate:yyyy-MM-dd}).");
-
-                var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
-                if (dto.StoryPoints.HasValue && !validStoryPoints.Contains(dto.StoryPoints.Value))
-                    return BadRequest("Story points must be a Fibonacci number (1, 2, 3, 5, 8, 13, 21).");
+                if (calculatedDueDate > project.EndDate)
+                    return BadRequest(
+                        $"Calculated due date ({calculatedDueDate:yyyy-MM-dd}) exceeds " +
+                        $"the project end date ({project.EndDate:yyyy-MM-dd}).");
 
                 if (dto.AssigneeIds.Distinct().Count() != dto.AssigneeIds.Count)
                     return BadRequest("Duplicate assignee IDs are not allowed.");
+
+                if (dto.AssigneeIds.Any())
+                {
+                    var validAccountIds = await _context.Accounts
+                        .Where(a => dto.AssigneeIds.Contains(a.Id))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    var invalidIds = dto.AssigneeIds.Except(validAccountIds).ToList();
+                    if (invalidIds.Any())
+                        return BadRequest($"The following assignee IDs do not exist: {string.Join(", ", invalidIds)}");
+                }
 
                 if (dto.PriorityId.HasValue)
                 {
@@ -200,13 +242,13 @@ namespace TaskManagement.Controllers
                     PriorityId = dto.PriorityId,
                     StatusId = 1,
                     StartDate = dto.StartDate,
-                    DueDate = dto.DueDate,
+                    DueDate = calculatedDueDate,   //calculated result
                     StoryPoints = dto.StoryPoints,
                     ProjectId = dto.ProjectId,
                     ParentTaskId = dto.ParentTaskId,
                     CreatorId = creatorId,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime,
+                    UpdatedAt = PhTime
                 };
 
                 _context.Tasks.Add(task);
@@ -219,7 +261,7 @@ namespace TaskManagement.Controllers
                 if (project.StatusId == 1)
                 {
                     project.StatusId = 2;
-                    project.UpdatedAt = DateTime.UtcNow;
+                    project.UpdatedAt = PhTime;
 
                     _context.TimeLogs.Add(new TimeLog
                     {
@@ -242,7 +284,7 @@ namespace TaskManagement.Controllers
                             TaskId = task.Id,
                             AccountId = accountId,
                             AssignedById = creatorId,
-                            AssignedAt = DateTime.UtcNow
+                            AssignedAt = PhTime
                         });
                     }
                 }
@@ -252,11 +294,11 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = creatorId,
-                    Action = "Created",
+                    Action = dto.ParentTaskId == null ? "Task created" : "Subtask created",
                     NewValue = task.Title,
                     Note = dto.ParentTaskId == null
-                        ? $"Task created by {creator.Name} ({creatorRole})"
-                        : $"Subtask created by {creator.Name} ({creatorRole})"
+                        ? $"Task created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}"
+                        : $"Subtask created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}"
                 });
 
                 await _context.SaveChangesAsync();
@@ -273,7 +315,7 @@ namespace TaskManagement.Controllers
                     creatorId = task.CreatorId,
                     storyPoints = task.StoryPoints,
                     startDate = task.StartDate,
-                    dueDate = task.DueDate,
+                    dueDate = task.DueDate,        //calculated value returned
                     createdAt = task.CreatedAt,
                     updatedAt = task.UpdatedAt
                 });
@@ -283,6 +325,7 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
 
         [HttpPatch("UpdateTask/{id}")]
         public async Task<IActionResult> UpdateTask(int id, [FromBody] UpdateTaskDTO dto, [FromQuery] int updaterId)
@@ -310,22 +353,30 @@ namespace TaskManagement.Controllers
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can update tasks.");
                 }
 
+                if (dto.StartDate == default)
+                    return BadRequest("Start date is required.");
+
                 var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
                 if (dto.StoryPoints.HasValue && !validStoryPoints.Contains(dto.StoryPoints.Value))
                     return BadRequest("Story points must be a Fibonacci number (1, 2, 3, 5, 8, 13, 21).");
 
-                if (dto.StartDate == default)
-                    return BadRequest("Start date is required.");
-                if (dto.DueDate == default)
-                    return BadRequest("End date is required.");
-                if (dto.DueDate <= dto.StartDate)
-                    return BadRequest("End date must be after start date.");
+                // recalculate
+                var effectiveStoryPoints = dto.StoryPoints ?? task.StoryPoints;
+                if (!effectiveStoryPoints.HasValue)
+                    return BadRequest("Story points are required to recalculate the due date.");
+
+                var recalculatedDueDate = BusinessDayHelper.CalculateDueDateFromStoryPoints(
+                    dto.StartDate,
+                    effectiveStoryPoints.Value
+                );
 
                 var taskProject = await _context.Projects.FindAsync(task.ProjectId);
                 if (taskProject == null)
                     return NotFound("Project not found.");
-                if (dto.DueDate > taskProject.EndDate)
-                    return BadRequest($"Task due date cannot exceed the project end date ({taskProject.EndDate:yyyy-MM-dd}).");
+                if (recalculatedDueDate > taskProject.EndDate)
+                    return BadRequest(
+                        $"Recalculated due date ({recalculatedDueDate:yyyy-MM-dd}) exceeds " +
+                        $"the project end date ({taskProject.EndDate:yyyy-MM-dd}).");
 
                 var changes = new List<string>();
 
@@ -336,7 +387,7 @@ namespace TaskManagement.Controllers
                 }
                 if (dto.Description != null && dto.Description != task.Description)
                 {
-                    changes.Add($"Description updated");
+                    changes.Add("Description updated");
                     task.Description = dto.Description;
                 }
                 if (dto.StatusId.HasValue && dto.StatusId != task.StatusId)
@@ -357,15 +408,15 @@ namespace TaskManagement.Controllers
                     changes.Add($"PriorityId: {task.PriorityId} → {dto.PriorityId}");
                     task.PriorityId = dto.PriorityId;
                 }
-                if (dto.StartDate != null && dto.StartDate != task.StartDate)
+                if (dto.StartDate != task.StartDate)
                 {
                     changes.Add($"StartDate: {task.StartDate} → {dto.StartDate}");
                     task.StartDate = dto.StartDate;
                 }
-                if (dto.DueDate != null && dto.DueDate != task.DueDate)
+                if (recalculatedDueDate != task.DueDate)
                 {
-                    changes.Add($"DueDate: {task.DueDate} → {dto.DueDate}");
-                    task.DueDate = dto.DueDate;
+                    changes.Add($"DueDate recalculated: {task.DueDate:yyyy-MM-dd HH:mm} → {recalculatedDueDate:yyyy-MM-dd HH:mm}");
+                    task.DueDate = recalculatedDueDate;  // ← always the calculated value
                 }
                 if (dto.StoryPoints.HasValue && dto.StoryPoints != task.StoryPoints)
                 {
@@ -378,7 +429,7 @@ namespace TaskManagement.Controllers
                     task.ParentTaskId = dto.ParentTaskId;
                 }
 
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 var updaterProjectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == updaterId && !m.IsDeleted);
@@ -454,7 +505,7 @@ namespace TaskManagement.Controllers
                 var newStatusName = newStatus.Name;
 
                 task.StatusId = dto.StatusId;
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 var requesterProjectRole = isAdmin ? "Admin" : projectMember?.Role ?? "Unknown";
 
@@ -528,7 +579,7 @@ namespace TaskManagement.Controllers
             if (task == null || task.IsDeleted) return;
 
             task.IsDeleted = true;
-            task.UpdatedAt = DateTime.UtcNow;
+            task.UpdatedAt = PhTime;
 
             var assignments = await _context.TaskAssignments
                 .Where(a => a.TaskId == taskId && !a.IsDeleted)
@@ -537,7 +588,7 @@ namespace TaskManagement.Controllers
             foreach (var assignment in assignments)
             {
                 assignment.IsDeleted = true;
-                assignment.DeletedAt = DateTime.UtcNow;
+                assignment.DeletedAt = PhTime;
             }
 
             var subtasks = await _context.Tasks
@@ -572,6 +623,18 @@ namespace TaskManagement.Controllers
                     var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can assign tasks.");
+
+                    if (dto.AssigneeIds.Any())
+                    {
+                        var validAccountIds = await _context.Accounts
+                            .Where(a => dto.AssigneeIds.Contains(a.Id))
+                            .Select(a => a.Id)
+                            .ToListAsync();
+
+                        var invalidIds = dto.AssigneeIds.Except(validAccountIds).ToList();
+                        if (invalidIds.Any())
+                            return BadRequest($"The following assignee IDs do not exist: {string.Join(", ", invalidIds)}");
+                    }
                 }
 
                 var existing = await _context.TaskAssignments
@@ -581,7 +644,7 @@ namespace TaskManagement.Controllers
                 foreach (var a in existing)
                 {
                     a.IsDeleted = true;
-                    a.DeletedAt = DateTime.UtcNow;
+                    a.DeletedAt = PhTime;
                 }
 
                 foreach (var accountId in dto.AssigneeIds)
@@ -591,11 +654,11 @@ namespace TaskManagement.Controllers
                         TaskId = id,
                         AccountId = accountId,
                         AssignedById = dto.AssignedById,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = PhTime
                     });
                 }
 
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 var assignerProjectMember = await _context.ProjectMembers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById && !m.IsDeleted);
@@ -649,7 +712,6 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
-                // ✅ Return empty list instead of 404
                 return Ok(tasks);
             }
             catch (Exception ex)
@@ -835,7 +897,7 @@ namespace TaskManagement.Controllers
             if (task == null) return 0;
 
             task.IsDeleted = false;
-            task.UpdatedAt = DateTime.UtcNow;
+            task.UpdatedAt = PhTime;
 
             var assignments = await _context.TaskAssignments
                 .Where(a => a.TaskId == taskId && a.IsDeleted)

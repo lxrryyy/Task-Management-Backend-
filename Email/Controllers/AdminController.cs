@@ -12,8 +12,9 @@ namespace TaskManagement.Controllers
     public class AdminController : ControllerBase
     {
         private readonly AccountDbContext _context;
-
-        public AdminController(AccountDbContext context)
+		private static DateTime PhTime =>
+	        TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+		public AdminController(AccountDbContext context)
         {
             _context = context;
         }
@@ -39,7 +40,7 @@ namespace TaskManagement.Controllers
 
                 var oldStatusId = task.StatusId;
                 task.StatusId = dto.StatusId; 
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -81,7 +82,7 @@ namespace TaskManagement.Controllers
 
                 var oldPriorityId = task.PriorityId;
                 task.PriorityId = priorityId; // 👈
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -118,7 +119,7 @@ namespace TaskManagement.Controllers
 
                 var oldDueDate = task.DueDate?.ToString() ?? "None";
                 task.DueDate = dueDate;
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -168,11 +169,11 @@ namespace TaskManagement.Controllers
                         TaskId = taskId,
                         AccountId = accountId,
                         AssignedById = adminId,
-                        AssignedAt = DateTime.UtcNow
+                        AssignedAt = PhTime
                     });
                 }
 
-                task.UpdatedAt = DateTime.UtcNow;
+                task.UpdatedAt = PhTime;
 
                 _context.TimeLogs.Add(new TimeLog
                 {
@@ -216,8 +217,8 @@ namespace TaskManagement.Controllers
                         CanEdit = dto.CanEdit,
                         CanDelete = dto.CanDelete,
                         CanComment = dto.CanComment,
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
+                        CreatedAt = PhTime,
+                        UpdatedAt = PhTime
                     });
                 }
                 else
@@ -226,7 +227,7 @@ namespace TaskManagement.Controllers
                     existing.CanEdit = dto.CanEdit;
                     existing.CanDelete = dto.CanDelete;
                     existing.CanComment = dto.CanComment;
-                    existing.UpdatedAt = DateTime.UtcNow;
+                    existing.UpdatedAt = PhTime;
                 }
 
                 _context.TimeLogs.Add(new TimeLog

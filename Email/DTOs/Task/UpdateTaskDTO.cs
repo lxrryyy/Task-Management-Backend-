@@ -9,8 +9,7 @@ namespace TaskManagement.DTOs.Task
         public int? StatusId { get; set; }        
         public int? PriorityId { get; set; }
         public int? StoryPoints { get; set; }
-        public DateTime? StartDate { get; set; }
-        public DateTime? DueDate { get; set; }
+        public DateTime StartDate { get; set; }
 
         public int ProjectId { get; set; }          // task belongs to a project
         public int? ParentTaskId { get; set; }      // null = main task, has value = subtask

@@ -6,6 +6,8 @@ namespace TaskManagement.Models
 {
     public class TaskItem
     {
+
+        private static DateTime PhTime => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         [Key]
         public int Id { get; set; }
         [Required]
@@ -22,8 +24,8 @@ namespace TaskManagement.Models
         public int? StoryPoints { get; set; } // 1, 2, 3, 4, 5
         public DateTime? StartDate { get; set; }
         public DateTime? DueDate { get; set; }
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; } 
+        public DateTime UpdatedAt { get; set; } 
         public bool IsDeleted { get; set; } = false;
 
         [ForeignKey("ProjectId")]               // ← add this

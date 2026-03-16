@@ -9,12 +9,12 @@ namespace TaskManagement.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class NotificationController : ControllerBase
+	public class NotificationController : ControllerBase
     {
         private readonly AccountDbContext _context;
         private readonly IEmailService _emailService;
-
-        public NotificationController(AccountDbContext context, IEmailService emailService)
+		private static DateTime PhTime => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+		public NotificationController(AccountDbContext context, IEmailService emailService)
         {
             _context = context;
             _emailService = emailService;
@@ -118,7 +118,7 @@ namespace TaskManagement.Controllers
                         Message = $"You have been assigned to task: {task.Title}",
                         Type = "TaskAssigned",
                         IsRead = false,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = PhTime
                     });
 
                     // Send email
@@ -162,7 +162,7 @@ namespace TaskManagement.Controllers
                         Message = $"Task '{task.Title}' status changed to: {newStatus}",
                         Type = "StatusChanged",
                         IsRead = false,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = PhTime
                     });
 
                     await _emailService.SendStatusChangedAsync(account.Email, task.Title, newStatus);
@@ -208,7 +208,7 @@ namespace TaskManagement.Controllers
                         Message = $"Reminder: Task '{task.Title}' is due on {task.DueDate:MMMM dd, yyyy}",
                         Type = "DeadlineReminder",
                         IsRead = false,
-                        CreatedAt = DateTime.UtcNow
+                        CreatedAt = PhTime
                     });
 
                     await _emailService.SendDeadlineReminderAsync(account.Email, task.Title, task.DueDate.Value);
@@ -238,7 +238,7 @@ namespace TaskManagement.Controllers
                               $"ReminderDaysBefore={dto.DeadlineReminderDaysBefore}",
                     Type = "Settings",
                     IsRead = true,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();

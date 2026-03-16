@@ -24,7 +24,8 @@ namespace TaskManagement.Controllers
     {
         private readonly AccountDbContext _context;
         private readonly IEmailService _emailService;
-
+        private static DateTime PhTime =>
+         TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public AuthController(AccountDbContext context, IEmailService emailService)
         {
             _context = context;
@@ -54,11 +55,11 @@ namespace TaskManagement.Controllers
 
                 var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
 
-                var expiry = request.RememberMe ? DateTime.UtcNow.AddDays(7) : DateTime.UtcNow.AddHours(1);
+                var expiry = request.RememberMe ? PhTime.AddDays(7) : PhTime.AddHours(1);
 
                 account.ApiToken = token;
                 account.TokenExpiresAt = expiry;
-                account.UpdatedAt = DateTime.UtcNow;
+                account.UpdatedAt = PhTime;
 
                 await _context.SaveChangesAsync();
 
@@ -96,7 +97,7 @@ namespace TaskManagement.Controllers
 
                 account.ApiToken = null;
                 account.TokenExpiresAt = null;
-                account.UpdatedAt = DateTime.UtcNow;
+                account.UpdatedAt = PhTime;
 
                 await _context.SaveChangesAsync();
 
@@ -124,7 +125,7 @@ namespace TaskManagement.Controllers
                 if (account == null)
                     return Unauthorized("Invalid token.");
 
-                if (account.TokenExpiresAt == null || account.TokenExpiresAt < DateTime.UtcNow)
+                if (account.TokenExpiresAt == null || account.TokenExpiresAt < PhTime)
                 {
                     account.ApiToken = null;
                     account.TokenExpiresAt = null;
@@ -163,7 +164,7 @@ namespace TaskManagement.Controllers
                     return NotFound("No account found with that email.");
 
                 var existingOtps = await _context.OtpCodes
-                    .Where(o => o.AccountId == account.Id && !o.IsUsed && o.ExpiresAt > DateTime.UtcNow)
+                    .Where(o => o.AccountId == account.Id && !o.IsUsed && o.ExpiresAt > PhTime)
                     .ToListAsync();
                 foreach (var old in existingOtps)
                     old.IsUsed = true;
@@ -174,9 +175,9 @@ namespace TaskManagement.Controllers
                 {
                     AccountId = account.Id,
                     Code = otp,
-                    ExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                    ExpiresAt = PhTime.AddMinutes(15),
                     IsUsed = false,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();
@@ -211,7 +212,7 @@ namespace TaskManagement.Controllers
                 if (otpRecord == null)
                     return BadRequest("Invalid OTP.");
 
-                if (otpRecord.ExpiresAt < DateTime.UtcNow)
+                if (otpRecord.ExpiresAt < PhTime)
                     return BadRequest("OTP has expired.");
 
                 otpRecord.IsUsed = true;
@@ -245,7 +246,7 @@ namespace TaskManagement.Controllers
                 if (verifiedOtp == null)
                     return BadRequest("OTP not verified. Please verify your OTP first.");
 
-                if (verifiedOtp.CreatedAt < DateTime.UtcNow.AddMinutes(-10))
+                if (verifiedOtp.CreatedAt < PhTime.AddMinutes(-10))
                     return BadRequest("Reset session expired. Please request a new OTP.");
 
                 if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
@@ -253,7 +254,7 @@ namespace TaskManagement.Controllers
 
                 var hasher = new PasswordHasher<Account>();
                 account.PasswordHash = hasher.HashPassword(account, request.NewPassword);
-                account.UpdatedAt = DateTime.UtcNow;
+                account.UpdatedAt = PhTime;
 
                 await _context.SaveChangesAsync();
 

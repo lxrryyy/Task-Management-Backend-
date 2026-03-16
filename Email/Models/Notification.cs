@@ -6,7 +6,8 @@ namespace TaskManagement.Models
 {
     public class Notification
     {
-        [Key]
+
+		[Key]
         public int Id { get; set; }
         public int AccountId { get; set; }
         public int? TaskId { get; set; }
@@ -14,6 +15,6 @@ namespace TaskManagement.Models
         public string Message { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
         public bool IsRead { get; set; } = false;
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; }
     }
 }

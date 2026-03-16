@@ -10,7 +10,6 @@ namespace TaskManagement.Controllers
     public class TimelogController : ControllerBase
     {
         private readonly AccountDbContext _context;
-
         public TimelogController(AccountDbContext context)
         {
             _context = context;

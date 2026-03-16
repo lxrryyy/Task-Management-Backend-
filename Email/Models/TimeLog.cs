@@ -4,7 +4,8 @@ namespace TaskManagement.Models
 {
     public class TimeLog
     {
-        [Key]
+
+		[Key]
         public int Id { get; set; }
         public int? ProjectId { get; set; }
         public int? TaskId { get; set; }
@@ -13,6 +14,6 @@ namespace TaskManagement.Models
         public string? OldValue { get; set; }
         public string? NewValue { get; set; }
         public string? Note { get; set; }
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime CreatedAt { get; set; }
     }
 }
