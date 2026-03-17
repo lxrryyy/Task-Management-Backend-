@@ -9,10 +9,14 @@
                 { 3,  8  },   // S   — 6–8 hrs    
                 { 5,  16 },   // M   — 12–16 hrs  
                 { 8,  32 },   // L   — 3–4 days   
-                { 13, 45 },   // XL  — 1+ week
+                { 13, 45 },   // XL  — 1+ week 
                 { 21, 90 },   // XXL — 2+ weeks        
             }; // fibonacci sequence meanings
 
+        public static double GetHoursForStoryPoints(int storyPoints)
+        {
+            return StoryPointHours.TryGetValue(storyPoints, out var hours) ? hours : 0;
+        }
         public static DateTime AddBusinessDays(DateTime startDate, int businessDays)
         {
             if (businessDays < 0)

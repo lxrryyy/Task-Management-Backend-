@@ -24,6 +24,7 @@ builder.Services.AddRateLimiter(options =>
         opt.Window = TimeSpan.FromMinutes(1);
     });
 });
+
 // Swagger configuration
 builder.Services.AddSwaggerGen(options =>
 {
@@ -87,6 +88,7 @@ builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<IEmailService, EmailService>(); // EMAILS
+builder.Services.AddScoped<NotificationService>();
 
 var app = builder.Build();
 

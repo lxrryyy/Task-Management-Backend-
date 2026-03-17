@@ -5,6 +5,7 @@ using TaskManagement.Data;
 using TaskManagement.DTOs.Task;
 using TaskManagement.Helpers;
 using TaskManagement.Models;
+using TaskManagement.Services;
 
 namespace TaskManagement.Controllers
 {
@@ -13,13 +14,64 @@ namespace TaskManagement.Controllers
     public class TaskController : ControllerBase
     {
         private readonly AccountDbContext _context;
+        private readonly NotificationService _notificationService;
         private static DateTime PhTime =>
             TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
-        public TaskController(AccountDbContext context)
+        public TaskController(AccountDbContext context, NotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
+       
+        private async Task<List<object>> CheckWorkloadWarnings(int taskId, List<int> assigneeIds)
+        {
+            var warnings = new List<object>();
+
+            var task = await _context.Tasks.FindAsync(taskId);
+            if (task == null || !task.StoryPoints.HasValue)
+                return warnings;
+
+            foreach (var accountId in assigneeIds)
+            {
+                var assigneeAccount = await _context.Accounts.FindAsync(accountId);
+
+                var existingTaskHours = await _context.TaskAssignments
+                    .Where(a =>
+                        a.AccountId == accountId &&
+                        !a.IsDeleted &&
+                        !a.Task.IsDeleted &&
+                        a.TaskId != taskId &&
+                        a.Task.StoryPoints != null &&
+                        a.Task.StartDate.Value.Date <= task.DueDate.Value.Date &&
+                        a.Task.DueDate.Value.Date >= task.StartDate.Value.Date)
+                    .Select(a => a.Task.StoryPoints!.Value)
+                    .ToListAsync();
+
+                var existingHours = existingTaskHours.Sum(sp => BusinessDayHelper.GetHoursForStoryPoints(sp));
+                var newTaskHours = BusinessDayHelper.GetHoursForStoryPoints(task.StoryPoints.Value);
+                var totalHours = existingHours + newTaskHours;
+
+                if (totalHours > 8)
+                {
+                    warnings.Add(new
+                    {
+                        accountId = accountId,
+                        accountName = assigneeAccount?.Name,
+                        totalHours = totalHours,
+                        newTaskHours = newTaskHours,
+                        existingHours = existingHours,
+                        capacity = 8,
+                        overloadBy = totalHours - 8,
+                        message = $"{assigneeAccount?.Name} is overloaded by {totalHours - 8}h " +
+                                        $"({totalHours}h total / 8h daily capacity) " +
+                                        $"during {task.StartDate:yyyy-MM-dd} to {task.DueDate:yyyy-MM-dd}."
+                    });
+                }
+            }
+
+            return warnings;
+        }
         [HttpGet("GetAllTasksPriorities")]
         public async Task<IActionResult> GetAllTasksPriorities()
         {
@@ -286,6 +338,13 @@ namespace TaskManagement.Controllers
                             AssignedById = creatorId,
                             AssignedAt = PhTime
                         });
+
+                        await _notificationService.NotifyAsync(
+                           accountId,
+                           $"You have been assigned to task: '{task.Title}' in project '{project.Name}'.",
+                           projectId: task.ProjectId,
+                           taskId: task.Id
+                        );
                     }
                 }
 
@@ -294,7 +353,7 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = creatorId,
-                    Action = dto.ParentTaskId == null ? "Task created" : "Subtask created",
+                    Action = "POST",
                     NewValue = task.Title,
                     Note = dto.ParentTaskId == null
                         ? $"Task created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}"
@@ -302,7 +361,7 @@ namespace TaskManagement.Controllers
                 });
 
                 await _context.SaveChangesAsync();
-
+                var warnings = await CheckWorkloadWarnings(task.Id, dto.AssigneeIds);
                 return CreatedAtAction(nameof(GetTaskById), new { id = task.Id }, new
                 {
                     id = task.Id,
@@ -317,7 +376,8 @@ namespace TaskManagement.Controllers
                     startDate = task.StartDate,
                     dueDate = task.DueDate,        //calculated value returned
                     createdAt = task.CreatedAt,
-                    updatedAt = task.UpdatedAt
+                    updatedAt = task.UpdatedAt,
+                    warnings = warnings.Any() ? warnings : null
                 });
             }
             catch (Exception ex)
@@ -442,7 +502,7 @@ namespace TaskManagement.Controllers
                         ProjectId = task.ProjectId,
                         TaskId = task.Id,
                         AccountId = updaterId,
-                        Action = "Updated",
+                        Action = "PATCH",
                         NewValue = string.Join(", ", changes),
                         Note = $"Task updated by {updater.Name} ({updaterProjectRole})"
                     });
@@ -514,12 +574,46 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
-                    Action = "Status Updated",
+                    Action = "PATCH",
                     OldValue = oldStatusName,
                     NewValue = newStatusName,
                     Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name} ({requesterProjectRole})"
                 });
+                var assigneeIds = await _context.TaskAssignments
+                    .Where(a => a.TaskId == id && !a.IsDeleted)
+                    .Select(a => a.AccountId)
+                    .ToListAsync();
 
+                foreach (var accountId in assigneeIds)
+                {
+                    // Don't notify the person who made the change
+                    if (accountId == requesterId) continue;
+
+                    await _notificationService.NotifyAsync(
+                        accountId,
+                        $"Task '{task.Title}' status changed from '{oldStatusName}' to '{newStatusName}'.",
+                        projectId: task.ProjectId,
+                        taskId: task.Id
+                    );
+                }
+
+                if (dto.StatusId == 3 && !isProjectManager && !isAdmin)
+                {
+                    var pmMember = await _context.ProjectMembers
+                        .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId &&
+                            (m.Role == "ProjectManager" || m.Role == "ProjectManager-ScrumMaster") &&
+                            !m.IsDeleted);
+
+                    if (pmMember != null)
+                    {
+                        await _notificationService.NotifyAsync(
+                            pmMember.AccountId,
+                            $"Task '{task.Title}' has been submitted for review by {requester.Name}.",
+                            projectId: task.ProjectId,
+                            taskId: task.Id
+                        );
+                    }
+                }
                 await _context.SaveChangesAsync();
                 return NoContent();
             }
@@ -559,7 +653,7 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = deleterId,
-                    Action = "Deleted",
+                    Action = "DELETE",
                     OldValue = task.Title,
                     Note = $"Task and all subtasks deleted by {deleter.Name} ({deleterRole})"
                 });
@@ -647,6 +741,7 @@ namespace TaskManagement.Controllers
                     a.DeletedAt = PhTime;
                 }
 
+                var project = await _context.Projects.FindAsync(task.ProjectId);
                 foreach (var accountId in dto.AssigneeIds)
                 {
                     _context.TaskAssignments.Add(new TaskAssignment
@@ -656,6 +751,13 @@ namespace TaskManagement.Controllers
                         AssignedById = dto.AssignedById,
                         AssignedAt = PhTime
                     });
+
+                    await _notificationService.NotifyAsync(
+                       accountId,
+                       $"You have been assigned to task: '{task.Title}' in project '{project?.Name}'.",
+                       projectId: task.ProjectId,
+                       taskId: task.Id
+                    );
                 }
 
                 task.UpdatedAt = PhTime;
@@ -669,13 +771,26 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = id,
                     AccountId = dto.AssignedById,
-                    Action = "Assigned",
+                    Action = "PATCH",
                     NewValue = string.Join(", ", dto.AssigneeIds),
                     Note = $"Task assigned by {assigner.Name} ({assignerProjectRole})"
                 });
 
                 await _context.SaveChangesAsync();
-                return NoContent();
+
+                var warnings = await CheckWorkloadWarnings(id, dto.AssigneeIds);
+
+                if (warnings.Any())
+                {
+                    return Ok(new
+                    {
+                        message = "Task assigned successfully, but some assignees are overloaded.",
+                        warnings = warnings
+                    });
+                }
+
+                return Ok(new { message = "Task assigned successfully." });
+
             }
             catch (Exception ex)
             {
@@ -872,7 +987,7 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
-                    Action = "TaskReactivated",
+                    Action = "RESTORE",
                     NewValue = task.Title,
                     Note = $"Task and all subtasks reactivated by {requester.Name} ({requesterRole})"
                 });

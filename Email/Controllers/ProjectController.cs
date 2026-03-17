@@ -15,11 +15,14 @@ namespace TaskManagement.Controllers
     public class ProjectController : ControllerBase
     {
         private readonly AccountDbContext _context;
+        private readonly NotificationService _notificationService;
+ 
         private static DateTime PhTime =>
              TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
-        public ProjectController(AccountDbContext context)
+        public ProjectController(AccountDbContext context, NotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
         private async Task<int> GetProjectCompletionPercentage(int projectId)
@@ -205,6 +208,43 @@ namespace TaskManagement.Controllers
                 _context.Projects.Add(project);
                 await _context.SaveChangesAsync();
 
+                //NOTIFFF
+                if (scrumMasterId == projectManagerId || !scrumMasterId.HasValue)
+                {
+                    await _notificationService.NotifyAsync(
+                        projectManagerId,
+                        $"You have been assigned as Project Manager - Scrum Master of '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+                }
+                else
+                {
+                    await _notificationService.NotifyAsync(
+                        projectManagerId,
+                        $"You have been assigned as Project Manager of '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+
+                    await _notificationService.NotifyAsync(
+                        scrumMasterId.Value,
+                        $"You have been assigned as Scrum Master of '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+                }
+
+                foreach (var memberId in dto.MemberIds.Distinct())
+                {
+                    if (memberId == projectManagerId || memberId == scrumMasterId)
+                        continue;
+
+                    await _notificationService.NotifyAsync(
+                        memberId,
+                        $"You have been added as a Member to project '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+                }
+
+
                 var pmRole = (scrumMasterId != null && scrumMasterId == projectManagerId)
                     ? "ProjectManager-ScrumMaster"
                     : "ProjectManager";
@@ -257,7 +297,7 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = creatorId,
-                    Action = "Project Created",
+                    Action = "POST",
                     NewValue = project.Name,
                     Note = $"Project created by {creator.Name}"
                 });
@@ -519,7 +559,7 @@ namespace TaskManagement.Controllers
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = requesterId,
-                        Action = "Project Updated",
+                        Action = "PATCH",
                         NewValue = string.Join(", ", changes),
                         Note = $"Project updated by {requester.Name} ({requesterRole})"
                     });
@@ -768,7 +808,7 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "Project Deleted",
+                    Action = "DELETE",
                     OldValue = project.Name,
                     Note = $"Project deleted by {account.Name} ({deleterRole})"
                 });
@@ -893,7 +933,7 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "Project Reactivated",
+                    Action = "RESTORE",
                     NewValue = project.Name,
                     Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})"
                 });

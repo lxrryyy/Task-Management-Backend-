@@ -17,10 +17,16 @@ namespace TaskManagement.Controllers
 
         // GET all logs for a task
         [HttpGet("GetTaskLogs/{taskId}")]
-        public async Task<IActionResult> GetTaskLogs(int taskId)
+        public async Task<IActionResult> GetTaskLogs(int taskId, [FromQuery] int requesterId)
         {
             try
             {
+                var requester = await _context.Accounts.FindAsync(requesterId);
+                if (requester == null)
+                    return NotFound("Account not found.");
+                if (requester.Role != "Admin")
+                    return StatusCode(403, "Only Admins can view audit logs."); 
+
                 var logs = await _context.TimeLogs
                     .Where(l => l.TaskId == taskId)
                     .OrderByDescending(l => l.CreatedAt)
@@ -47,10 +53,16 @@ namespace TaskManagement.Controllers
 
         // GET all logs for a user
         [HttpGet("GetUserLogs/{accountId}")]
-        public async Task<IActionResult> GetUserLogs(int accountId)
+        public async Task<IActionResult> GetUserLogs(int accountId, [FromQuery] int requesterId)
         {
             try
             {
+                var requester = await _context.Accounts.FindAsync(requesterId);
+                if (requester == null)
+                    return NotFound("Account not found.");
+                if (requester.Role != "Admin")
+                    return StatusCode(403, "Only Admins can view audit logs."); 
+
                 var logs = await _context.TimeLogs
                     .Where(l => l.AccountId == accountId)
                     .OrderByDescending(l => l.CreatedAt)
@@ -77,15 +89,23 @@ namespace TaskManagement.Controllers
 
         // GET all logs in the system
         [HttpGet("GetAllLogs")]
-        public async Task<IActionResult> GetAllLogs()
+        public async Task<IActionResult> GetAllLogs([FromQuery] int requesterId)
         {
             try
             {
+                var requester = await _context.Accounts.FindAsync(requesterId);
+                if (requester == null)
+                    return NotFound("Account not found.");
+
+                if (requester.Role != "Admin")
+                    return StatusCode(403, "Only Admins can view audit logs.");
+
                 var logs = await _context.TimeLogs
                     .OrderByDescending(l => l.CreatedAt)
                     .Select(l => new TimelogResponseDTO
                     {
                         Id = l.Id,
+                        ProjectId = l.ProjectId,
                         TaskId = l.TaskId,
                         AccountId = l.AccountId,
                         Action = l.Action,
@@ -106,10 +126,16 @@ namespace TaskManagement.Controllers
 
         // GET logs by action type
         [HttpGet("GetLogsByAction")]
-        public async Task<IActionResult> GetLogsByAction([FromQuery] string action)
+        public async Task<IActionResult> GetLogsByAction([FromQuery] string action, [FromQuery] int requesterId)
         {
             try
             {
+                var requester = await _context.Accounts.FindAsync(requesterId);
+                if (requester == null)
+                    return NotFound("Account not found.");
+                if (requester.Role != "Admin")
+                    return StatusCode(403, "Only Admins can view audit logs.");
+
                 var logs = await _context.TimeLogs
                     .Where(l => l.Action == action)
                     .OrderByDescending(l => l.CreatedAt)
@@ -136,10 +162,16 @@ namespace TaskManagement.Controllers
 
         // GET logs by date range
         [HttpGet("GetLogsByDateRange")]
-        public async Task<IActionResult> GetLogsByDateRange([FromQuery] DateTime from, [FromQuery] DateTime to)
+        public async Task<IActionResult> GetLogsByDateRange([FromQuery] DateTime from, [FromQuery] DateTime to, [FromQuery] int requesterId)
         {
             try
             {
+                var requester = await _context.Accounts.FindAsync(requesterId);
+                if (requester == null)
+                    return NotFound("Account not found.");
+                if (requester.Role != "Admin")
+                    return StatusCode(403, "Only Admins can view audit logs.");
+
                 var logs = await _context.TimeLogs
                     .Where(l => l.CreatedAt >= from && l.CreatedAt <= to)
                     .OrderByDescending(l => l.CreatedAt)
