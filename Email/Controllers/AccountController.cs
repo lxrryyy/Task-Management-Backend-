@@ -130,7 +130,7 @@ namespace TaskManagement.Controllers
             _context.Accounts.Add(newAccount);
             await _context.SaveChangesAsync();
 
-            _context.TimeLogs.Add(new TimeLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
                 Action = "AccountCreated",
@@ -183,7 +183,7 @@ namespace TaskManagement.Controllers
 
             existingAccount.isActive = false;
 
-            _context.TimeLogs.Add(new TimeLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
                 Action = "Account Deleted",
@@ -208,7 +208,7 @@ namespace TaskManagement.Controllers
 
             existingAccount.isActive = true;
 
-            _context.TimeLogs.Add(new TimeLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
                 Action = "Account Reactivated",

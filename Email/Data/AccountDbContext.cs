@@ -16,7 +16,7 @@ namespace TaskManagement.Data
         public DbSet<TaskComment> TaskComments { get; set; }
         public DbSet<TaskPermission> TaskPermissions { get; set; }
         public DbSet<Notification> Notifications { get; set; }
-        public DbSet<TimeLog> TimeLogs { get; set; }
+        public DbSet<AuditLog> AuditLogs { get; set; }
         // Project Management
         public DbSet<Project> Projects { get; set; }            
         public DbSet<ProjectMember> ProjectMembers { get; set; }
@@ -54,9 +54,9 @@ namespace TaskManagement.Data
                 .HasForeignKey(c => c.TaskId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            modelBuilder.Entity<TimeLog>()
+            modelBuilder.Entity<AuditLog>()
                 .HasOne<TaskItem>()
-                .WithMany(t => t.TimeLogs)
+                .WithMany(t => t.AuditLogs)
                 .HasForeignKey(l => l.TaskId)
                 .OnDelete(DeleteBehavior.Cascade);
 

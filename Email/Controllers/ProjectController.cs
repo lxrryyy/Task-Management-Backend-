@@ -292,14 +292,15 @@ namespace TaskManagement.Controllers
                 }
 
                 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = creatorId,
                     Action = "POST",
                     NewValue = project.Name,
-                    Note = $"Project created by {creator.Name}"
+                    Note = $"Project created by {creator.Name}",
+                    CreatedAt = PhTime
                 });
                 await _context.SaveChangesAsync();
 
@@ -554,14 +555,15 @@ namespace TaskManagement.Controllers
 
                 if (changes.Any())
                 {
-                    _context.TimeLogs.Add(new TimeLog
+                    _context.AuditLogs.Add(new AuditLog
                     {
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = requesterId,
                         Action = "PATCH",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Project updated by {requester.Name} ({requesterRole})"
+                        Note = $"Project updated by {requester.Name} ({requesterRole})",
+                        CreatedAt = PhTime
                     });
                 }
 
@@ -803,14 +805,15 @@ namespace TaskManagement.Controllers
                
                 var deleterRole = account.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
                     Action = "DELETE",
                     OldValue = project.Name,
-                    Note = $"Project deleted by {account.Name} ({deleterRole})"
+                    Note = $"Project deleted by {account.Name} ({deleterRole})",
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();
@@ -928,14 +931,15 @@ namespace TaskManagement.Controllers
                     }
                 }
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
                     Action = "RESTORE",
                     NewValue = project.Name,
-                    Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})"
+                    Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})",
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();

@@ -315,16 +315,17 @@ namespace TaskManagement.Controllers
                     project.StatusId = 2;
                     project.UpdatedAt = PhTime;
 
-                    _context.TimeLogs.Add(new TimeLog
+                    _context.AuditLogs.Add(new AuditLog
                     {
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = creatorId,
-                        Action = "Project Status Changed",
+                        Action = "PATCH",
                         OldValue = "Not Started",
                         NewValue = "Active",
-                        Note = $"Project set to Active because a task was created by {creator.Name} ({creatorRole})"
-                    });
+                        Note = $"Project set to Active because a task was created by {creator.Name} ({creatorRole})",
+						CreatedAt = PhTime
+					});
                 }
 
                 if (dto.AssigneeIds.Any())
@@ -348,7 +349,7 @@ namespace TaskManagement.Controllers
                     }
                 }
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
@@ -357,8 +358,10 @@ namespace TaskManagement.Controllers
                     NewValue = task.Title,
                     Note = dto.ParentTaskId == null
                         ? $"Task created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}"
-                        : $"Subtask created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}"
-                });
+                        : $"Subtask created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}",
+
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 var warnings = await CheckWorkloadWarnings(task.Id, dto.AssigneeIds);
@@ -497,15 +500,16 @@ namespace TaskManagement.Controllers
 
                 if (changes.Any())
                 {
-                    _context.TimeLogs.Add(new TimeLog
+                    _context.AuditLogs.Add(new AuditLog
                     {
                         ProjectId = task.ProjectId,
                         TaskId = task.Id,
                         AccountId = updaterId,
                         Action = "PATCH",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Task updated by {updater.Name} ({updaterProjectRole})"
-                    });
+                        Note = $"Task updated by {updater.Name} ({updaterProjectRole})",
+						CreatedAt = PhTime
+					});
                 }
 
                 await _context.SaveChangesAsync();
@@ -569,7 +573,7 @@ namespace TaskManagement.Controllers
 
                 var requesterProjectRole = isAdmin ? "Admin" : projectMember?.Role ?? "Unknown";
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
@@ -577,8 +581,9 @@ namespace TaskManagement.Controllers
                     Action = "PATCH",
                     OldValue = oldStatusName,
                     NewValue = newStatusName,
-                    Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name} ({requesterProjectRole})"
-                });
+                    Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name} ({requesterProjectRole})",
+					CreatedAt = PhTime
+				});
                 var assigneeIds = await _context.TaskAssignments
                     .Where(a => a.TaskId == id && !a.IsDeleted)
                     .Select(a => a.AccountId)
@@ -648,15 +653,16 @@ namespace TaskManagement.Controllers
 
                 await SoftDeleteTaskRecursive(id);
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = deleterId,
                     Action = "DELETE",
                     OldValue = task.Title,
-                    Note = $"Task and all subtasks deleted by {deleter.Name} ({deleterRole})"
-                });
+                    Note = $"Task and all subtasks deleted by {deleter.Name} ({deleterRole})",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return NoContent();
@@ -766,15 +772,16 @@ namespace TaskManagement.Controllers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == dto.AssignedById && !m.IsDeleted);
                 var assignerProjectRole = assigner.Role == "Admin" ? "Admin" : assignerProjectMember?.Role;
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = task.ProjectId,
                     TaskId = id,
                     AccountId = dto.AssignedById,
                     Action = "PATCH",
                     NewValue = string.Join(", ", dto.AssigneeIds),
-                    Note = $"Task assigned by {assigner.Name} ({assignerProjectRole})"
-                });
+                    Note = $"Task assigned by {assigner.Name} ({assignerProjectRole})",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
 
@@ -982,15 +989,16 @@ namespace TaskManagement.Controllers
 
                 var restoredCount = await ReactivateTaskRecursive(taskId);
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
                     Action = "RESTORE",
                     NewValue = task.Title,
-                    Note = $"Task and all subtasks reactivated by {requester.Name} ({requesterRole})"
-                });
+                    Note = $"Task and all subtasks reactivated by {requester.Name} ({requesterRole})",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return Ok(new

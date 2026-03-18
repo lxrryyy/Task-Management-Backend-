@@ -33,7 +33,7 @@ namespace TaskManagement.Models
 
         public ICollection<TaskAssignment> Assignments { get; set; } = new List<TaskAssignment>();
         public ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();
-        public ICollection<TimeLog> TimeLogs { get; set; } = new List<TimeLog>();
+        public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
         public ICollection<TaskItem> SubTasks { get; set; } = new List<TaskItem>(); // subtaksss
     }
 }

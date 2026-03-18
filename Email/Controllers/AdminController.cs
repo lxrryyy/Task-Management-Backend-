@@ -42,15 +42,16 @@ namespace TaskManagement.Controllers
                 task.StatusId = dto.StatusId; 
                 task.UpdatedAt = PhTime;
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     TaskId = taskId,
                     AccountId = adminId,
                     Action = "StatusChanged",
                     OldValue = oldStatusId.ToString(),
                     NewValue = dto.StatusId.ToString(),
-                    Note = dto.Note ?? "Force updated by admin"
-                });
+                    Note = dto.Note ?? "Force updated by admin",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return NoContent();
@@ -84,15 +85,16 @@ namespace TaskManagement.Controllers
                 task.PriorityId = priorityId; // 👈
                 task.UpdatedAt = PhTime;
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     TaskId = taskId,
                     AccountId = adminId,
                     Action = "PriorityChanged",
                     OldValue = oldPriorityId.ToString(),
                     NewValue = priorityId.ToString(),
-                    Note = "Priority changed by admin"
-                });
+                    Note = "Priority changed by admin",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return NoContent();
@@ -121,15 +123,16 @@ namespace TaskManagement.Controllers
                 task.DueDate = dueDate;
                 task.UpdatedAt = PhTime;
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     TaskId = taskId,
                     AccountId = adminId,
                     Action = "DeadlineUpdated",
                     OldValue = oldDueDate,
                     NewValue = dueDate.ToString(),
-                    Note = "Deadline updated by admin"
-                });
+                    Note = "Deadline updated by admin",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return NoContent();
@@ -175,15 +178,16 @@ namespace TaskManagement.Controllers
 
                 task.UpdatedAt = PhTime;
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     TaskId = taskId,
                     AccountId = adminId,
                     Action = "Reassigned",
                     OldValue = string.Join(", ", oldAssignees),
                     NewValue = string.Join(", ", dto.AssigneeIds),
-                    Note = "Task reassigned by admin"
-                });
+                    Note = "Task reassigned by admin",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return NoContent();
@@ -230,13 +234,14 @@ namespace TaskManagement.Controllers
                     existing.UpdatedAt = PhTime;
                 }
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     TaskId = dto.TaskId,
                     AccountId = adminId,
                     Action = "PermissionUpdated",
-                    Note = $"Permission updated for account {dto.AccountId} by admin"
-                });
+                    Note = $"Permission updated for account {dto.AccountId} by admin",
+					CreatedAt = PhTime
+				});
 
                 await _context.SaveChangesAsync();
                 return NoContent();
