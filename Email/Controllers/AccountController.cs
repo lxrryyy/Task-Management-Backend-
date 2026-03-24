@@ -101,8 +101,6 @@ namespace TaskManagement.Controllers
             {
                 return BadRequest("Email must follow the format example@domain.com.");
             }
-
-            // Validate password requirements
             var password = newAccount.PasswordHash;
             if (password.Length < 8)
                 return BadRequest("Password must be at least 8 characters.");
@@ -115,9 +113,6 @@ namespace TaskManagement.Controllers
             if (!password.Any(ch => "!@#$%^&*()_+-=[]{}|;':\",./<>?".Contains(ch)))
                 return BadRequest("Password must contain at least one special character (!@#$%^&*...).");
 
-            
-
-            // check if email already exists
             var emailExists = await _context.Accounts
                 .AnyAsync(a => a.Email.ToLower() == newAccount.Email.ToLower());
             if (emailExists)
@@ -142,33 +137,112 @@ namespace TaskManagement.Controllers
         }
 
         [HttpPatch("{id}")]
-        public async Task<IActionResult> UpdateAccount(int id, [FromBody] UpdateAccountDto updatedAccount, [FromQuery] int adminId)
+        public async Task<IActionResult> UpdateAccount(int id, [FromBody] UpdateAccountDto updatedAccount)
         {
-            var admin = await _context.Accounts.FindAsync(adminId);
-            if (admin == null || admin.Role != "Admin")
-                return StatusCode(403, "Access denied. Admins only.");
-
             var existingAccount = await _context.Accounts.FindAsync(id);
             if (existingAccount == null)
                 return NotFound();
 
-            if (updatedAccount.Name != null)
-                existingAccount.Name = updatedAccount.Name;
-            if (updatedAccount.Email != null)
-                existingAccount.Email = updatedAccount.Email;
-            if (updatedAccount.PasswordHash != null)
-                existingAccount.PasswordHash = _passwordHasher.HashPassword(existingAccount, updatedAccount.PasswordHash);
-            if (updatedAccount.Role != null)
+            var changes = new List<string>();
+            if (updatedAccount.CurrentPassword != null ||
+                updatedAccount.NewPassword != null ||
+                updatedAccount.ConfirmPassword != null)
+            {
+                if (string.IsNullOrWhiteSpace(updatedAccount.CurrentPassword))
+                    return BadRequest("Current password is required.");
+                if (string.IsNullOrWhiteSpace(updatedAccount.NewPassword))
+                    return BadRequest("New password is required.");
+                if (string.IsNullOrWhiteSpace(updatedAccount.ConfirmPassword))
+                    return BadRequest("Confirm password is required.");
+
+                var verifyResult = _passwordHasher.VerifyHashedPassword(
+                    existingAccount,
+                    existingAccount.PasswordHash,
+                    updatedAccount.CurrentPassword);
+
+                if (verifyResult == PasswordVerificationResult.Failed)
+                    return BadRequest("Current password is incorrect.");
+
+                if (updatedAccount.NewPassword != updatedAccount.ConfirmPassword)
+                    return BadRequest("New password and confirm password do not match.");
+
+                if (updatedAccount.CurrentPassword == updatedAccount.NewPassword)
+                    return BadRequest("New password must be different from the current password.");
+
+                existingAccount.PasswordHash = _passwordHasher.HashPassword(
+                    existingAccount,
+                    updatedAccount.NewPassword);
+
+                changes.Add("Password updated");
+            }
+            if (updatedAccount.Role != null && updatedAccount.Role != existingAccount.Role)
+            {
+                changes.Add($"Role: {existingAccount.Role} → {updatedAccount.Role}");
                 existingAccount.Role = updatedAccount.Role;
-            if (updatedAccount.isActive.HasValue)
+            }
+            if (updatedAccount.isActive.HasValue && updatedAccount.isActive.Value != existingAccount.isActive)
+            {
+                changes.Add($"isActive: {existingAccount.isActive} → {updatedAccount.isActive.Value}");
                 existingAccount.isActive = updatedAccount.isActive.Value;
-            if (updatedAccount.ProfilePicture != null)
+            }
+            if (updatedAccount.ProfilePicture != null && updatedAccount.ProfilePicture != existingAccount.ProfilePicture)
+            {
+                changes.Add("ProfilePicture updated");
                 existingAccount.ProfilePicture = updatedAccount.ProfilePicture;
+            }
+            if (updatedAccount.Specialization != null && updatedAccount.Specialization != existingAccount.Specialization)
+            {
+                changes.Add($"Specialization: {existingAccount.Specialization ?? "None"} → {updatedAccount.Specialization}");
+                existingAccount.Specialization = updatedAccount.Specialization;
+            }
+
+            if (!changes.Any())
+                return Ok(new { message = "No changes detected." });
 
             existingAccount.UpdatedAt = PhTime;
             await _context.SaveChangesAsync();
-            return NoContent();
+
+            var updatedFieldNames = changes
+                .Select(c => c.Split(':')[0].Trim())  
+                .ToList();
+
+            var fieldSummary = updatedFieldNames.Count == 1
+                ? updatedFieldNames[0]
+                : string.Join(", ", updatedFieldNames[..^1]) + " and " + updatedFieldNames[^1];
+
+            return Ok(new
+            {
+                message = $"{fieldSummary} {(updatedFieldNames.Count == 1 ? "has" : "have")} been updated successfully.",
+                updatedFields = changes,
+                account = new
+                {
+                    existingAccount.Role,
+                    existingAccount.Specialization,
+                    existingAccount.isActive,
+                    existingAccount.ProfilePicture,
+                    existingAccount.UpdatedAt
+                }
+            });
         }
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> RemoveProfilePicture(int id)
+        {
+            var account = await _context.Accounts.FindAsync(id);
+            var existingAccount = _context.Accounts.Find(account);
+            if (existingAccount == null)
+                return NotFound();
+            existingAccount.ProfilePicture = null;
+            _context.AuditLogs.Add(new AuditLog
+            {
+                AccountId = account.Id,
+                Action = "Profile Picture Removed",
+                Note = $"Profile picture removed by {account.Name}, {account.Role}",
+                CreatedAt = PhTime
+            });
+            await _context.SaveChangesAsync();
+            return Ok("Profile picture has been removed");
+        }
+
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAccount(int id, [FromQuery] int adminId)

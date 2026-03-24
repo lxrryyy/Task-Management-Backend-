@@ -35,6 +35,7 @@ namespace TaskManagement.Data
                 Name = "Admin",
                 Email = "admin@admin.com",
                 Role = "Admin",
+                Specialization = string.Empty,
                 isActive = true,
                 CreatedAt = new DateTime(2026, 1, 1),
                 UpdatedAt = new DateTime(2026, 1, 1)

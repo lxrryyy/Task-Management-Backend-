@@ -52,7 +52,7 @@ namespace TaskManagement.Controllers
                             (requester.Role == "Admin" ||
                              _context.TaskAssignments.Any(a => a.TaskId == t.Id && a.AccountId == requesterId && !a.IsDeleted) ||
                              _context.ProjectMembers.Any(m => m.ProjectId == p.Id && m.AccountId == requesterId && !m.IsDeleted &&
-                                 (m.Role == "ProjectManager" || m.Role == "ScrumMaster" || m.Role == "ProjectManager-ScrumMaster"))))
+                                 (m.Role == "Project Manager" || m.Role == "Scrum Master" || m.Role == "Project Manager - Scrum Master"))))
                         .Select(t => new
                         {
                             t.Id,
@@ -250,9 +250,9 @@ namespace TaskManagement.Controllers
                             m.ProjectId == t.ProjectId &&
                             m.AccountId == requesterId &&
                             !m.IsDeleted &&
-                            (m.Role == "ProjectManager" ||
-                             m.Role == "ScrumMaster" ||
-                             m.Role == "ProjectManager-ScrumMaster")));
+                            (m.Role == "Project Manager" ||
+                             m.Role == "Scrum Master" ||
+                             m.Role == "Project Manager - Scrum Master")));
                 }
 
                 var total = await taskQuery.CountAsync();
@@ -325,9 +325,9 @@ namespace TaskManagement.Controllers
                     var projectMember = await _context.ProjectMembers
                         .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId && !m.IsDeleted);
 
-                    var isPrivileged = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ScrumMaster" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                    var isPrivileged = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Scrum Master" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                     if (!isPrivileged)
                     {

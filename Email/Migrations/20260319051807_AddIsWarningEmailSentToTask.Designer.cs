@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TaskManagement.Data;
 
@@ -11,9 +12,11 @@ using TaskManagement.Data;
 namespace TaskManagement.Migrations
 {
     [DbContext(typeof(AccountDbContext))]
-    partial class AccountDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260319051807_AddIsWarningEmailSentToTask")]
+    partial class AddIsWarningEmailSentToTask
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -56,10 +59,6 @@ namespace TaskManagement.Migrations
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Specialization")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
@@ -83,9 +82,8 @@ namespace TaskManagement.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             Email = "admin@admin.com",
                             Name = "Admin",
-                            PasswordHash = "AQAAAAIAAYagAAAAEDO++FRQQgfWGvzABJdiMsfRn5UZrM6ZCSmQZ14gY8n2LrAUApHc1ZE+kolV7L5lXQ==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEIOB1cZGE2iFn61AQCNl/Y5UiSXEVJEyPvZEJ/qjjMp/uWfo8Mi9p/8QcN+RrQ7G6A==",
                             Role = "Admin",
-                            Specialization = "",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             isActive = true
                         });

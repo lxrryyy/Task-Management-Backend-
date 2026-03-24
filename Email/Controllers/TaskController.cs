@@ -15,15 +15,17 @@ namespace TaskManagement.Controllers
     {
         private readonly AccountDbContext _context;
         private readonly NotificationService _notificationService;
+        private readonly IEmailService _emailService;
         private static DateTime PhTime =>
             TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
-        public TaskController(AccountDbContext context, NotificationService notificationService)
+        public TaskController(AccountDbContext context, NotificationService notificationService, IEmailService emailService)
         {
             _context = context;
             _notificationService = notificationService;
+            _emailService = emailService;
         }
 
-       
+
         private async Task<List<object>> CheckWorkloadWarnings(int taskId, List<int> assigneeIds)
         {
             var warnings = new List<object>();
@@ -199,8 +201,12 @@ namespace TaskManagement.Controllers
             }
         }
 
-        [HttpGet("CalculateDueDate")]
-        public IActionResult CalculateDueDate([FromQuery] DateTime startDate, [FromQuery] int storyPoints)
+        [HttpGet("CheckAssigneeWorkload")]
+        public async Task<IActionResult> CheckAssigneeWorkload(
+    [FromQuery] DateTime startDate,
+    [FromQuery] int storyPoints,
+    [FromQuery] List<int> assigneeIds,
+    [FromQuery] int projectId)
         {
             var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
             if (!validStoryPoints.Contains(storyPoints))
@@ -209,13 +215,60 @@ namespace TaskManagement.Controllers
             if (startDate == default)
                 return BadRequest("Start date is required.");
 
-            var dueDate = BusinessDayHelper.CalculateDueDateFromStoryPoints(startDate, storyPoints);
+            if (!assigneeIds.Any())
+                return Ok(new { warnings = Array.Empty<object>() });
+
+            // Calculate what the due date WOULD be
+            var projectedDueDate = BusinessDayHelper.CalculateDueDateFromStoryPoints(startDate, storyPoints);
+            var newTaskHours = BusinessDayHelper.GetHoursForStoryPoints(storyPoints);
+
+            var warnings = new List<object>();
+
+            foreach (var accountId in assigneeIds)
+            {
+                var account = await _context.Accounts.FindAsync(accountId);
+
+                // Find existing tasks that overlap with the projected start→due window
+                var overlappingHours = await _context.TaskAssignments
+                    .Where(a =>
+                        a.AccountId == accountId &&
+                        !a.IsDeleted &&
+                        !a.Task.IsDeleted &&
+                        a.Task.StoryPoints != null &&
+                        a.Task.StartDate.Value.Date <= projectedDueDate.Date &&
+                        a.Task.DueDate.Value.Date >= startDate.Date)
+                    .Select(a => a.Task.StoryPoints!.Value)
+                    .ToListAsync();
+
+                var existingHours = overlappingHours.Sum(sp => BusinessDayHelper.GetHoursForStoryPoints(sp));
+                var totalHours = existingHours + newTaskHours;
+
+                if (totalHours > 8)
+                {
+                    warnings.Add(new
+                    {
+                        accountId,
+                        accountName = account?.Name,
+                        existingHours,
+                        newTaskHours,
+                        totalHours,
+                        capacity = 8,
+                        overloadBy = totalHours - 8,
+                        projectedStartDate = startDate.ToString("yyyy-MM-dd HH:mm"),
+                        projectedDueDate = projectedDueDate.ToString("yyyy-MM-dd HH:mm"),
+                        message = $"{account?.Name} is overloaded by {totalHours - 8}h " +
+                                  $"({totalHours}h total / 8h daily capacity) " +
+                                  $"during {startDate:yyyy-MM-dd} to {projectedDueDate:yyyy-MM-dd}."
+                    });
+                }
+            }
 
             return Ok(new
             {
-                startDate = startDate,
-                storyPoints = storyPoints,
-                dueDate = dueDate
+                projectedStartDate = startDate.ToString("yyyy-MM-dd HH:mm"),
+                projectedDueDate = projectedDueDate.ToString("yyyy-MM-dd HH:mm"),
+                storyPoints,
+                warnings
             });
         }
 
@@ -236,7 +289,7 @@ namespace TaskManagement.Controllers
                     if (projectMember == null)
                         return StatusCode(403, "You are not a member of this project.");
 
-                    var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
+                    var allowedRoles = new[] { "Project Manager", "Scrum Master", "Project Manager - Scrum Master" };
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can create tasks.");
                 }
@@ -346,6 +399,9 @@ namespace TaskManagement.Controllers
                            projectId: task.ProjectId,
                            taskId: task.Id
                         );
+                        var assigneeAccount = await _context.Accounts.FindAsync(accountId);
+                        if (assigneeAccount?.Email != null)
+                            await _emailService.SendTaskAssignedAsync(assigneeAccount.Email, task.Title);
                     }
                 }
 
@@ -379,8 +435,7 @@ namespace TaskManagement.Controllers
                     startDate = task.StartDate,
                     dueDate = task.DueDate,        //calculated value returned
                     createdAt = task.CreatedAt,
-                    updatedAt = task.UpdatedAt,
-                    warnings = warnings.Any() ? warnings : null
+                    updatedAt = task.UpdatedAt
                 });
             }
             catch (Exception ex)
@@ -411,7 +466,7 @@ namespace TaskManagement.Controllers
                     if (projectMember == null)
                         return StatusCode(403, "You are not a member of this project.");
 
-                    var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
+                    var allowedRoles = new[] { "Project Manager", "Scrum Master", "Project Manager - Scrum Master" };
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can update tasks.");
                 }
@@ -541,9 +596,9 @@ namespace TaskManagement.Controllers
                     .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId && m.AccountId == requesterId && !m.IsDeleted);
 
                 var isAdmin = requester.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
-                var isPrivileged = isProjectManager || projectMember?.Role == "ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
+                var isPrivileged = isProjectManager || projectMember?.Role == "Scrum Master";
 
                 if (!isAdmin && !isPrivileged && !isAssigned)
                     return StatusCode(403, "You are not assigned to this task.");
@@ -591,7 +646,6 @@ namespace TaskManagement.Controllers
 
                 foreach (var accountId in assigneeIds)
                 {
-                    // Don't notify the person who made the change
                     if (accountId == requesterId) continue;
 
                     await _notificationService.NotifyAsync(
@@ -600,13 +654,17 @@ namespace TaskManagement.Controllers
                         projectId: task.ProjectId,
                         taskId: task.Id
                     );
+
+                    var assigneeAccount = await _context.Accounts.FindAsync(accountId);
+                    if (assigneeAccount?.Email != null)
+                        await _emailService.SendStatusChangedAsync(assigneeAccount.Email, task.Title, newStatusName);
                 }
 
                 if (dto.StatusId == 3 && !isProjectManager && !isAdmin)
                 {
                     var pmMember = await _context.ProjectMembers
                         .FirstOrDefaultAsync(m => m.ProjectId == task.ProjectId &&
-                            (m.Role == "ProjectManager" || m.Role == "ProjectManager-ScrumMaster") &&
+                            (m.Role == "Project Manager" || m.Role == "Project Manager - Scrum Master") &&
                             !m.IsDeleted);
 
                     if (pmMember != null)
@@ -646,9 +704,9 @@ namespace TaskManagement.Controllers
                 var deleterRole = deleter.Role == "Admin" ? "Admin" : deleterProjectMember?.Role;
 
                 if (deleterRole != "Admin" &&
-                    deleterRole != "ProjectManager" &&
-                    deleterRole != "ScrumMaster" &&
-                    deleterRole != "ProjectManager-ScrumMaster")
+                    deleterRole != "Project Manager" &&
+                    deleterRole != "Scrum Master" &&
+                    deleterRole != "Project Manager - Scrum Master")
                     return StatusCode(403, "You do not have permission to delete tasks.");
 
                 await SoftDeleteTaskRecursive(id);
@@ -720,7 +778,7 @@ namespace TaskManagement.Controllers
                     if (projectMember == null)
                         return StatusCode(403, "You are not a member of this project.");
 
-                    var allowedRoles = new[] { "ProjectManager", "ScrumMaster", "ProjectManager-ScrumMaster" };
+                    var allowedRoles = new[] { "Project Manager", "Scrum Master", "Project Manager - Scrum Master" };
                     if (!allowedRoles.Contains(projectMember.Role))
                         return StatusCode(403, "Only Admin, Project Manager, or Scrum Master can assign tasks.");
 
@@ -764,6 +822,10 @@ namespace TaskManagement.Controllers
                        projectId: task.ProjectId,
                        taskId: task.Id
                     );
+                    var assigneeAccount = await _context.Accounts.FindAsync(accountId);
+                    if (assigneeAccount?.Email != null)
+                        await _emailService.SendTaskAssignedAsync(assigneeAccount.Email, task.Title);
+
                 }
 
                 task.UpdatedAt = PhTime;
@@ -862,9 +924,9 @@ namespace TaskManagement.Controllers
                     if (projectMember == null)
                         return StatusCode(403, "You are not a member of this project.");
 
-                    var isPrivileged = projectMember.Role == "ProjectManager" ||
-                                       projectMember.Role == "ScrumMaster" ||
-                                       projectMember.Role == "ProjectManager-ScrumMaster";
+                    var isPrivileged = projectMember.Role == "Project Manager" ||
+                                       projectMember.Role == "Scrum Master" ||
+                                       projectMember.Role == "Project Manager - Scrum Master";
 
                     if (!isPrivileged)
                         query = query.Where(t => t.Assignments.Any(a => a.AccountId == requesterId && !a.IsDeleted));

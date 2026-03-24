@@ -30,6 +30,7 @@ namespace TaskManagement.Models
 
         [ForeignKey("ProjectId")]               // ← add this
         public Project Project { get; set; } = null!;
+        public bool IsWarningEmailSent { get; set; } = false;
 
         public ICollection<TaskAssignment> Assignments { get; set; } = new List<TaskAssignment>();
         public ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();

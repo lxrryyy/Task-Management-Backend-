@@ -11,7 +11,41 @@ namespace TaskManagement.Services
         {
             _config = config;
         }
+        public async Task SendTaskDueWarningAsync(string to, string recipientName, string taskTitle, string projectName, DateTime dueDate, int hoursLeft)
+        {
+            var isUrgent = hoursLeft <= 6;
+            var accentColor = isUrgent ? "#EF4444" : "#F59E0B";
+            var badgeBg = isUrgent ? "#FEE2E2" : "#FEF3C7";
+            var badgeText = isUrgent ? "#991B1B" : "#92400E";
+            var urgencyLabel = isUrgent ? "URGENT — Due Very Soon" : "Due Soon";
+            var emoji = isUrgent ? "🚨" : "⚠️";
 
+            var subject = $"{emoji} Task Due in {hoursLeft}h: {taskTitle}";
+            var body = $@"
+                <div style='font-family: Segoe UI, Arial, sans-serif; max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
+                    <div style='background: {accentColor}; padding: 28px 32px;'>
+                        <h1 style='color: #fff; margin: 0; font-size: 20px;'>{emoji} Task {urgencyLabel}</h1>
+                    </div>
+                    <div style='padding: 32px; color: #333;'>
+                        <p style='font-size: 15px;'>Hello <strong>{recipientName}</strong>,</p>
+                        <p style='font-size: 15px;'>A task assigned to you is due within <strong>{hoursLeft} hour{(hoursLeft == 1 ? "" : "s")}</strong>. Please take action.</p>
+                        <div style='background: #f8f9fc; border-left: 4px solid {accentColor}; border-radius: 4px; padding: 14px 18px; margin: 20px 0;'>
+                            <p style='margin: 6px 0; font-size: 14px;'><strong style='color: #666; min-width: 110px; display: inline-block;'>Task:</strong> {taskTitle}</p>
+                            <p style='margin: 6px 0; font-size: 14px;'><strong style='color: #666; min-width: 110px; display: inline-block;'>Project:</strong> {projectName}</p>
+                            <p style='margin: 6px 0; font-size: 14px;'><strong style='color: #666; min-width: 110px; display: inline-block;'>Due Date:</strong> {dueDate:MMMM dd, yyyy hh:mm tt}</p>
+                            <p style='margin: 6px 0; font-size: 14px;'><strong style='color: #666; min-width: 110px; display: inline-block;'>Time Left:</strong>
+                                <span style='background: {badgeBg}; color: {badgeText}; padding: 3px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;'>~{hoursLeft}h remaining</span>
+                            </p>
+                        </div>
+                        <p style='font-size: 15px;'>Please ensure this task is completed or submitted for review before the deadline.</p>
+                    </div>
+                    <div style='background: #f4f6f9; padding: 18px 32px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #e8eaed;'>
+                        This is an automated message from the Task Management System. Please do not reply.
+                    </div>
+                </div>";
+
+            await SendEmailAsync(to, subject, body);
+        }
         public async Task SendEmailAsync(string toEmail, string subject, string body)
         {
             var smtpHost = _config["Smtp:Host"];
@@ -40,13 +74,12 @@ namespace TaskManagement.Services
             await client.SendMailAsync(mailMessage);
         }
 
-        public async Task SendTaskAssignedAsync(string toEmail, string taskTitle, int taskId)
+        public async Task SendTaskAssignedAsync(string toEmail, string taskTitle)
         {
             var subject = $"Task Assigned: {taskTitle}";
             var body = $@"
                 <h2>You have been assigned a new task</h2>
                 <p><strong>Task:</strong> {taskTitle}</p>
-                <p><strong>Task ID:</strong> {taskId}</p>
                 <p>Please log in to view the task details.</p>
             ";
             await SendEmailAsync(toEmail, subject, body);

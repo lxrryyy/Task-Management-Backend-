@@ -111,9 +111,9 @@ namespace TaskManagement.Controllers
                     .ToListAsync();
 
                 var privilegedProjectIds = myProjectRoles
-                    .Where(r => r.Role == "ProjectManager"
-                             || r.Role == "ScrumMaster"
-                             || r.Role == "ProjectManager-ScrumMaster")
+                    .Where(r => r.Role == "Project Manager"
+                             || r.Role == "Scrum Master"
+                             || r.Role == "Project Manager - Scrum Master")
                     .Select(r => r.ProjectId)
                     .ToHashSet();
 
@@ -260,9 +260,9 @@ namespace TaskManagement.Controllers
                     .ToListAsync();
 
                 var privilegedProjectIds = myProjectRoles
-                    .Where(r => r.Role == "ProjectManager"
-                             || r.Role == "ScrumMaster"
-                             || r.Role == "ProjectManager-ScrumMaster")
+                    .Where(r => r.Role == "Project Manager"
+                             || r.Role == "Scrum Master"
+                             || r.Role == "Project Manager - Scrum Master")
                     .Select(r => r.ProjectId)
                     .ToHashSet();
 

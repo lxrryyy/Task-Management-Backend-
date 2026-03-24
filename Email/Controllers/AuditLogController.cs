@@ -1,11 +1,13 @@
-﻿using TaskManagement.Data;
-using TaskManagement.DTOs.AuditLog;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using ClosedXML.Excel;          
+﻿using ClosedXML.Excel;          
 using iTextSharp.text;           
 using iTextSharp.text.pdf;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Identity.Client;
 using System.IO;
+using TaskManagement.Data;
+using TaskManagement.DTOs.AuditLog;
+using TaskManagement.Models;
 
 namespace TaskManagement.Controllers
 {
@@ -18,29 +20,50 @@ namespace TaskManagement.Controllers
         {
             _context = context;
         }
-
-        private async Task<List<AuditLogResponseDTO>> FetchAllLogsAsync()
+        private IQueryable<AuditLogResponseDTO> BuildLogQuery(IQueryable<AuditLog> source)
         {
-            return await _context.AuditLogs
-                .OrderByDescending(l => l.CreatedAt)
-                .Select(l => new AuditLogResponseDTO
-                {
-                    Id = l.Id,
-                    ProjectId = l.ProjectId,
-                    ProjectName = l.ProjectId.HasValue
-                        ? _context.Projects.Where(p => p.Id == l.ProjectId).Select(p => p.Name).FirstOrDefault()
-                        : null,
-                    ProjectRole = l.ProjectId.HasValue
-                        ? _context.ProjectMembers.Where(pm => pm.ProjectId == l.ProjectId && pm.AccountId == l.AccountId).Select(pm => pm.Role).FirstOrDefault()
-                        : null,
-                    AccountId = l.AccountId,
-                    Action = l.Action,
-                    OldValue = l.OldValue,
-                    NewValue = l.NewValue,
-                    Note = l.Note,
-                    CreatedAt = l.CreatedAt
-                })
-                .ToListAsync();
+            return source.Select(l => new AuditLogResponseDTO
+            {
+                Id = l.Id,
+                ProjectId = l.ProjectId,
+                ProjectName = l.ProjectId.HasValue
+                    ? _context.Projects.Where(p => p.Id == l.ProjectId).Select(p => p.Name).FirstOrDefault()
+                    : null,
+                ProjectRole = _context.Accounts
+                    .Where(a => a.Id == l.AccountId)
+                    .Select(a => a.Role)
+                    .FirstOrDefault() == "Admin"
+                    ? "Admin"
+                    : (l.ProjectId.HasValue
+                        ? _context.ProjectMembers
+                            .Where(pm => pm.ProjectId == l.ProjectId && pm.AccountId == l.AccountId)
+                            .Select(pm => pm.Role)
+                            .FirstOrDefault()
+                        : null),
+                TaskId = l.TaskId,
+                AccountId = l.AccountId,
+                Action = l.Action,
+                OldValue = l.OldValue,
+                NewValue = l.NewValue,
+                Note = l.Note,
+                CreatedAt = l.CreatedAt
+            });
+        }
+        private async Task<List<AuditLogResponseDTO>> FetchAllLogsAsync(
+            DateTime? from = null,
+            DateTime? to = null)
+        {
+            var query = _context.AuditLogs.AsQueryable();
+
+            if (from.HasValue)
+                query = query.Where(l => l.CreatedAt >= from.Value);
+
+            if (to.HasValue)
+                query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1)); // end of 'to' day
+
+            return await BuildLogQuery(
+                query.OrderByDescending(l => l.CreatedAt)
+            ).ToListAsync();
         }
 
         private async Task<(bool ok, IActionResult? error)> GuardAdminAsync(int requesterId)
@@ -62,21 +85,11 @@ namespace TaskManagement.Controllers
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await _context.AuditLogs
-                    .Where(l => l.TaskId == taskId)
-                    .OrderByDescending(l => l.CreatedAt)
-                    .Select(l => new AuditLogResponseDTO
-                    {
-                        Id = l.Id,
-                        TaskId = l.TaskId,
-                        AccountId = l.AccountId,
-                        Action = l.Action,
-                        OldValue = l.OldValue,
-                        NewValue = l.NewValue,
-                        Note = l.Note,
-                        CreatedAt = l.CreatedAt
-                    })
-                    .ToListAsync();
+                var logs = await BuildLogQuery(
+                    _context.AuditLogs
+                        .Where(l => l.TaskId == taskId)
+                        .OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
 
                 return Ok(logs);
             }
@@ -91,21 +104,11 @@ namespace TaskManagement.Controllers
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await _context.AuditLogs
-                    .Where(l => l.AccountId == accountId)
-                    .OrderByDescending(l => l.CreatedAt)
-                    .Select(l => new AuditLogResponseDTO
-                    {
-                        Id = l.Id,
-                        TaskId = l.TaskId,
-                        AccountId = l.AccountId,
-                        Action = l.Action,
-                        OldValue = l.OldValue,
-                        NewValue = l.NewValue,
-                        Note = l.Note,
-                        CreatedAt = l.CreatedAt
-                    })
-                    .ToListAsync();
+                var logs = await BuildLogQuery(
+                    _context.AuditLogs
+                        .Where(l => l.AccountId == accountId)
+                        .OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
 
                 return Ok(logs);
             }
@@ -134,21 +137,11 @@ namespace TaskManagement.Controllers
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await _context.AuditLogs
-                    .Where(l => l.Action == action)
-                    .OrderByDescending(l => l.CreatedAt)
-                    .Select(l => new AuditLogResponseDTO
-                    {
-                        Id = l.Id,
-                        TaskId = l.TaskId,
-                        AccountId = l.AccountId,
-                        Action = l.Action,
-                        OldValue = l.OldValue,
-                        NewValue = l.NewValue,
-                        Note = l.Note,
-                        CreatedAt = l.CreatedAt
-                    })
-                    .ToListAsync();
+                var logs = await BuildLogQuery(
+                    _context.AuditLogs
+                        .Where(l => l.Action == action)
+                        .OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
 
                 return Ok(logs);
             }
@@ -163,21 +156,11 @@ namespace TaskManagement.Controllers
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await _context.AuditLogs
-                    .Where(l => l.CreatedAt >= from && l.CreatedAt <= to)
-                    .OrderByDescending(l => l.CreatedAt)
-                    .Select(l => new AuditLogResponseDTO
-                    {
-                        Id = l.Id,
-                        TaskId = l.TaskId,
-                        AccountId = l.AccountId,
-                        Action = l.Action,
-                        OldValue = l.OldValue,
-                        NewValue = l.NewValue,
-                        Note = l.Note,
-                        CreatedAt = l.CreatedAt
-                    })
-                    .ToListAsync();
+                var logs = await BuildLogQuery(
+                    _context.AuditLogs
+                        .Where(l => l.CreatedAt >= from && l.CreatedAt <= to)
+                        .OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
 
                 return Ok(logs);
             }
@@ -185,17 +168,32 @@ namespace TaskManagement.Controllers
         }
 
         [HttpGet("ExportExcel")]
-        public async Task<IActionResult> ExportExcel([FromQuery] int requesterId)
+        public async Task<IActionResult> ExportExcel(
+             [FromQuery] int requesterId,
+             [FromQuery] DateTime? from = null,
+             [FromQuery] DateTime? to = null)
         {
             try
             {
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await FetchAllLogsAsync();
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                var logs = await FetchAllLogsAsync(from, to);
 
                 using var workbook = new XLWorkbook();
                 var sheet = workbook.Worksheets.Add("Audit Logs");
+
+                var rangeLabel = (from.HasValue || to.HasValue)
+                    ? $"Date Range: {(from.HasValue ? from.Value.ToString("yyyy-MM-dd") : "Start")} → {(to.HasValue ? to.Value.ToString("yyyy-MM-dd") : "End")}"
+                    : "Date Range: All";
+
+                sheet.Cell(1, 1).Value = rangeLabel;
+                sheet.Cell(1, 1).Style.Font.Italic = true;
+                sheet.Cell(1, 1).Style.Font.FontColor = XLColor.DarkGray;
+                sheet.Range(1, 1, 1, 10).Merge();
 
                 var headers = new[]
                 {
@@ -205,7 +203,7 @@ namespace TaskManagement.Controllers
 
                 for (int i = 0; i < headers.Length; i++)
                 {
-                    var cell = sheet.Cell(1, i + 1);
+                    var cell = sheet.Cell(2, i + 1);
                     cell.Value = headers[i];
                     cell.Style.Font.Bold = true;
                     cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#4F81BD");
@@ -216,7 +214,7 @@ namespace TaskManagement.Controllers
                 for (int i = 0; i < logs.Count; i++)
                 {
                     var log = logs[i];
-                    int row = i + 2;
+                    int row = i + 3;
                     sheet.Cell(row, 1).Value = log.Id;
                     sheet.Cell(row, 2).Value = log.ProjectId?.ToString() ?? "-";
                     sheet.Cell(row, 3).Value = log.ProjectName ?? "-";
@@ -238,80 +236,114 @@ namespace TaskManagement.Controllers
                 workbook.SaveAs(stream);
                 stream.Seek(0, SeekOrigin.Begin);
 
-                return File(
-                    stream.ToArray(),
+                var fileName = from.HasValue || to.HasValue
+                    ? $"AuditLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.xlsx"
+                    : $"AuditLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx";
+
+                return File(stream.ToArray(),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    $"AuditLogs_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx"
-                );
+                    fileName);
             }
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
         }
 
-    
+
         [HttpGet("ExportPdf")]
-        public async Task<IActionResult> ExportPdf([FromQuery] int requesterId)
+        public async Task<IActionResult> ExportPdf(
+     [FromQuery] int requesterId,
+     [FromQuery] DateTime? from = null,
+     [FromQuery] DateTime? to = null)
         {
             try
             {
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await FetchAllLogsAsync();
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                var logs = await FetchAllLogsAsync(from, to);
 
                 using var stream = new MemoryStream();
-                var document = new Document(PageSize.A4.Rotate(), 20f, 20f, 20f, 20f);
+
+                // Landscape A4 with tight margins to fit 10 columns
+                var document = new Document(PageSize.A4.Rotate(), 15f, 15f, 20f, 20f);
                 var writer = PdfWriter.GetInstance(document, stream);
                 writer.CloseStream = false;
                 document.Open();
 
+                // ── Title ─────────────────────────────────────────────────────────
                 var titleFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.DARK_GRAY);
-                document.Add(new Paragraph($"Audit Log Report — {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC", titleFont)
+                var subtitleFont = FontFactory.GetFont(FontFactory.HELVETICA, 9, BaseColor.GRAY);
+
+                document.Add(new Paragraph("Audit Log Report", titleFont)
+                {
+                    Alignment = Element.ALIGN_CENTER,
+                    SpacingAfter = 4f
+                });
+
+                // ── Date range subtitle ───────────────────────────────────────────
+                var rangeLabel = (from.HasValue || to.HasValue)
+                    ? $"Date Range: {(from.HasValue ? from.Value.ToString("yyyy-MM-dd") : "Start")} → {(to.HasValue ? to.Value.ToString("yyyy-MM-dd") : "End")}"
+                    : $"Date Range: All  |  Exported: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC";
+
+                document.Add(new Paragraph(rangeLabel, subtitleFont)
                 {
                     Alignment = Element.ALIGN_CENTER,
                     SpacingAfter = 12f
                 });
 
-                var table = new PdfPTable(7) { WidthPercentage = 100 };
-                table.SetWidths(new float[] { 4f, 14f, 10f, 8f, 12f, 12f, 10f });
+                // ── Table — 10 columns matching Excel ─────────────────────────────
+                var table = new PdfPTable(10) { WidthPercentage = 100 };
+                table.SetWidths(new float[] { 3f, 5f, 10f, 9f, 5f, 7f, 9f, 9f, 14f, 9f });
+                //                            ID  ProjId  ProjName  Role  AccId  Action  OldVal  NewVal  Note  CreatedAt
 
                 var headerBg = new BaseColor(79, 129, 189);
-                var headerFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 8, BaseColor.WHITE);
-                var cellFont = FontFactory.GetFont(FontFactory.HELVETICA, 7, BaseColor.BLACK);
+                var headerFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 7, BaseColor.WHITE);
+                var cellFont = FontFactory.GetFont(FontFactory.HELVETICA, 6, BaseColor.BLACK);
                 var altBg = new BaseColor(238, 243, 251);
 
-                foreach (var h in new[] { "ID", "Project", "Role", "Account ID", "Action", "Old → New", "Created At" })
+                // ── Headers ───────────────────────────────────────────────────────
+                foreach (var h in new[]
                 {
-                    var cell = new PdfPCell(new Phrase(h, headerFont))
+            "ID", "Project ID", "Project Name", "Project Role",
+            "Account ID", "Action", "Old Value", "New Value", "Note", "Created At"
+        })
+                {
+                    table.AddCell(new PdfPCell(new Phrase(h, headerFont))
                     {
                         BackgroundColor = headerBg,
                         HorizontalAlignment = Element.ALIGN_CENTER,
-                        Padding = 5f
-                    };
-                    table.AddCell(cell);
+                        VerticalAlignment = Element.ALIGN_MIDDLE,
+                        Padding = 4f
+                    });
                 }
 
+                // ── Data rows ─────────────────────────────────────────────────────
                 for (int i = 0; i < logs.Count; i++)
                 {
                     var log = logs[i];
                     var bg = i % 2 == 1 ? altBg : BaseColor.WHITE;
 
-                    var values = new[]
+                    foreach (var v in new[]
                     {
-                        log.Id.ToString(),
-                        log.ProjectName ?? "-",
-                        log.ProjectRole ?? "-",
-                        log.AccountId.ToString(),
-                        log.Action,
-                        $"{log.OldValue ?? "-"} → {log.NewValue ?? "-"}",
-                        log.CreatedAt.ToString("yyyy-MM-dd HH:mm")
-                    };
-
-                    foreach (var v in values)
+                log.Id.ToString(),
+                log.ProjectId?.ToString() ?? "-",
+                log.ProjectName         ?? "-",
+                log.ProjectRole         ?? "-",
+                log.AccountId.ToString(),
+                log.Action,
+                log.OldValue            ?? "-",
+                log.NewValue            ?? "-",
+                log.Note                ?? "-",
+                log.CreatedAt.ToString("yyyy-MM-dd HH:mm")
+            })
                     {
                         table.AddCell(new PdfPCell(new Phrase(v, cellFont))
                         {
                             BackgroundColor = bg,
-                            Padding = 4f
+                            Padding = 3f,
+                            VerticalAlignment = Element.ALIGN_MIDDLE
                         });
                     }
                 }
@@ -320,11 +352,11 @@ namespace TaskManagement.Controllers
                 document.Close();
                 stream.Seek(0, SeekOrigin.Begin);
 
-                return File(
-                    stream.ToArray(),
-                    "application/pdf",
-                    $"AuditLogs_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf"
-                );
+                var fileName = from.HasValue || to.HasValue
+                    ? $"AuditLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.pdf"
+                    : $"AuditLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+                return File(stream.ToArray(), "application/pdf", fileName);
             }
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
         }

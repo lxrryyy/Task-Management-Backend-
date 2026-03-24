@@ -21,7 +21,8 @@ namespace TaskManagement.Models
 
         [Required]
         [MaxLength(50)]
-        
+        public string? Specialization { get; set; } = null;
+
         public string Role { get; set; }
 
         public bool isActive { get; set; }

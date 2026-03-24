@@ -85,22 +85,23 @@
         }
 
         private static DateTime RoundUpToHalfDayBoundary(
-            DateTime dateTime,
-            int workdayStartHour,
-            int workdayEndHour)
+        DateTime dateTime,
+        int workdayStartHour,
+        int workdayEndHour)
         {
-            int midpoint = workdayStartHour + (workdayEndHour - workdayStartHour) / 2;
+            int midpoint = workdayStartHour + (workdayEndHour - workdayStartHour) / 2; // 13
 
-            if (dateTime.Hour < midpoint)
-                return dateTime.Date.AddHours(midpoint);
+            double totalMinutes = dateTime.Hour * 60 + dateTime.Minute + dateTime.Second / 60.0;
+            double midpointMinutes = midpoint * 60;
+            double endMinutes = workdayEndHour * 60;
 
-            if (dateTime.Hour == midpoint && dateTime.Minute > 0)
-                return dateTime.Date.AddHours(workdayEndHour);
+            if (totalMinutes <= midpointMinutes)
+                return dateTime.Date.AddHours(midpoint);   
 
-            if (dateTime.Hour > midpoint && dateTime.Hour < workdayEndHour)
-                return dateTime.Date.AddHours(workdayEndHour);
+            if (totalMinutes <= endMinutes)
+                return dateTime.Date.AddHours(workdayEndHour); 
 
-            return dateTime;
+            return dateTime; 
         }
     }
 }

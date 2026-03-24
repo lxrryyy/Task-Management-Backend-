@@ -70,20 +70,27 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
-
-        [HttpPatch("MarkAsRead/{id}")]
+        [HttpPut("{id}/read")]
         public async Task<IActionResult> MarkAsRead(int id)
         {
             try
             {
                 var notification = await _context.Notifications.FindAsync(id);
                 if (notification == null)
-                    return NotFound("Notification not found.");
+                    return NotFound(new { message = "Notification not found." });
+
+                if (notification.IsRead)
+                    return Ok(new { message = "Notification is already marked as read." });
 
                 notification.IsRead = true;
                 await _context.SaveChangesAsync();
 
-                return NoContent();
+                return Ok(new
+                {
+                    message = "Notification marked as read.",
+                    notificationId = notification.Id,
+                    isRead = notification.IsRead
+                });
             }
             catch (Exception ex)
             {
@@ -91,21 +98,33 @@ namespace TaskManagement.Controllers
             }
         }
 
-        [HttpPatch("MarkAllAsRead/{accountId}")]
-        public async Task<IActionResult> MarkAllAsRead(int accountId)
+        // PUT api/notifications/read-all?accountId=1
+        [HttpPut("read-all")]
+        public async Task<IActionResult> MarkAllAsRead([FromQuery] int accountId)
         {
             try
             {
+                var account = await _context.Accounts.FindAsync(accountId);
+                if (account == null)
+                    return NotFound(new { message = "Account not found." });
+
                 var notifications = await _context.Notifications
                     .Where(n => n.AccountId == accountId && !n.IsRead)
                     .ToListAsync();
+
+                if (!notifications.Any())
+                    return Ok(new { message = "No unread notifications found.", markedAsRead = 0 });
 
                 foreach (var n in notifications)
                     n.IsRead = true;
 
                 await _context.SaveChangesAsync();
 
-                return Ok(new { message = $"{notifications.Count} notifications marked as read." });
+                return Ok(new
+                {
+                    message = $"{notifications.Count} notification(s) marked as read.",
+                    markedAsRead = notifications.Count
+                });
             }
             catch (Exception ex)
             {

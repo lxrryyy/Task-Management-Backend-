@@ -16,13 +16,15 @@ namespace TaskManagement.Controllers
     {
         private readonly AccountDbContext _context;
         private readonly NotificationService _notificationService;
- 
+        private readonly IEmailService _emailService;
+
         private static DateTime PhTime =>
              TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
-        public ProjectController(AccountDbContext context, NotificationService notificationService)
+        public ProjectController(AccountDbContext context, NotificationService notificationService, IEmailService emailService)
         {
             _context = context;
             _notificationService = notificationService;
+            _emailService = emailService;
         }
 
         private async Task<int> GetProjectCompletionPercentage(int projectId)
@@ -244,10 +246,67 @@ namespace TaskManagement.Controllers
                     );
                 }
 
+                var pmAccount = await _context.Accounts.FindAsync(projectManagerId);
+                if (pmAccount?.Email != null)
+                {
+                    var pmRoleLabel = (scrumMasterId.HasValue && scrumMasterId == projectManagerId)
+                        ? "Project Manager & Scrum Master"
+                        : "Project Manager";
+
+                    await _emailService.SendEmailAsync(
+                        pmAccount.Email,
+                        $"You've been assigned to project: {dto.Name}",
+                        $@"<h2>Project Assignment</h2>
+                           <p>Hello <strong>{pmAccount.Name}</strong>,</p>
+                           <p>You have been assigned as <strong>{pmRoleLabel}</strong> of project <strong>{dto.Name}</strong>.</p>
+                           <p><strong>Start Date:</strong> {dto.StartDate:MMMM dd, yyyy}</p>
+                           <p><strong>End Date:</strong> {dto.EndDate:MMMM dd, yyyy}</p>
+                           <p>Please log in to view the project details.</p>"
+                    );
+                }
+
+                if (scrumMasterId.HasValue && scrumMasterId != projectManagerId)
+                {
+                    var smEmailAccount = await _context.Accounts.FindAsync(scrumMasterId.Value);
+                    if (smEmailAccount?.Email != null)
+                    {
+                        await _emailService.SendEmailAsync(
+                            smEmailAccount.Email,
+                            $"You've been assigned to project: {dto.Name}",
+                            $@"<h2>Project Assignment</h2>
+                           <p>Hello <strong>{smEmailAccount.Name}</strong>,</p>
+                           <p>You have been assigned as <strong>Scrum Master</strong> of project <strong>{dto.Name}</strong>.</p>
+                           <p><strong>Start Date:</strong> {dto.StartDate:MMMM dd, yyyy}</p>
+                           <p><strong>End Date:</strong> {dto.EndDate:MMMM dd, yyyy}</p>
+                           <p>Please log in to view the project details.</p>"
+                        );
+                    }
+                }
+
+                foreach (var memberId in dto.MemberIds.Distinct())
+                {
+                    if (memberId == projectManagerId || memberId == scrumMasterId)
+                        continue;
+
+                    var memberAccount = await _context.Accounts.FindAsync(memberId);
+                    if (memberAccount?.Email != null)
+                    {
+                        await _emailService.SendEmailAsync(
+                            memberAccount.Email,
+                            $"You've been added to project: {dto.Name}",
+                            $@"<h2>Project Member Assignment</h2>
+                               <p>Hello <strong>{memberAccount.Name}</strong>,</p>
+                               <p>You have been added as a <strong>Member</strong> of project <strong>{dto.Name}</strong>.</p>
+                               <p><strong>Start Date:</strong> {dto.StartDate:MMMM dd, yyyy}</p>
+                               <p><strong>End Date:</strong> {dto.EndDate:MMMM dd, yyyy}</p>
+                               <p>Please log in to view the project details.</p>"
+                        );
+                    }
+                }
 
                 var pmRole = (scrumMasterId != null && scrumMasterId == projectManagerId)
-                    ? "ProjectManager-ScrumMaster"
-                    : "ProjectManager";
+                    ? "Project Manager - Scrum Master"
+                    : "Project Manager";
 
                 _context.ProjectMembers.Add(new ProjectMember
                 {
@@ -263,7 +322,7 @@ namespace TaskManagement.Controllers
                     {
                         ProjectId = project.Id,
                         AccountId = scrumMasterId.Value,
-                        Role = "ScrumMaster",
+                        Role = "Scrum Master",
                         JoinedAt = PhTime
                     });
                 }
@@ -304,7 +363,6 @@ namespace TaskManagement.Controllers
                 });
                 await _context.SaveChangesAsync();
 
-                var pmAccount = await _context.Accounts.FindAsync(projectManagerId);
                 var smAccount = scrumMasterId.HasValue
                     ? await _context.Accounts.FindAsync(scrumMasterId.Value)
                     : null;
@@ -362,8 +420,8 @@ namespace TaskManagement.Controllers
                     .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId && !m.IsDeleted);
 
                 var isAdmin = requester.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                 if (!isAdmin && !isProjectManager)
                     return StatusCode(403, "Only the Project Manager or Admin can update this project.");
@@ -412,7 +470,7 @@ namespace TaskManagement.Controllers
                         {
                             ProjectId = projectId,
                             AccountId = dto.ProjectManagerId.Value,
-                            Role = "ProjectManager",
+                            Role = "Project Manager",
                             JoinedAt = PhTime
                         });
                     }
@@ -420,11 +478,11 @@ namespace TaskManagement.Controllers
                     {
                         newPm.IsDeleted = false;
                         newPm.DeletedAt = null;
-                        newPm.Role = newPm.Role == "ScrumMaster" ? "ProjectManager-ScrumMaster" : "ProjectManager";
+                        newPm.Role = newPm.Role == "Scrum Master" ? "Project Manager - Scrum Master" : "Project Manager";
                         _context.Entry(newPm).State = EntityState.Modified;
                     }
 
-                    changes.Add($"ProjectManager: {project.ProjectManagerId} → {dto.ProjectManagerId}");
+                    changes.Add($"Project Manager: {project.ProjectManagerId} → {dto.ProjectManagerId}");
                     project.ProjectManagerId = dto.ProjectManagerId.Value;
                 }
 
@@ -438,13 +496,13 @@ namespace TaskManagement.Controllers
 
                         if (oldSm != null)
                         {
-                            if (oldSm.Role == "ScrumMaster")
+                            if (oldSm.Role == "Scrum Master")
                             {
                                 oldSm.IsDeleted = true;
                                 oldSm.DeletedAt = PhTime;
                             }
-                            else if (oldSm.Role == "ProjectManager-ScrumMaster")
-                                oldSm.Role = "ProjectManager";
+                            else if (oldSm.Role == "Project Manager - Scrum Master")
+                                oldSm.Role = "Project Manager";
 
                             _context.Entry(oldSm).State = EntityState.Modified;
                         }
@@ -461,7 +519,7 @@ namespace TaskManagement.Controllers
                         {
                             newSm.IsDeleted = false;
                             newSm.DeletedAt = null;
-                            newSm.Role = newSm.Role == "ProjectManager" ? "ProjectManager-ScrumMaster" : "ScrumMaster";
+                            newSm.Role = newSm.Role == "Project Manager" ? "Project Manager - Scrum Master" : "Scrum Master";
                             _context.Entry(newSm).State = EntityState.Modified;
                         }
                         else
@@ -470,13 +528,13 @@ namespace TaskManagement.Controllers
                             {
                                 ProjectId = projectId,
                                 AccountId = dto.ScrumMasterId.Value,
-                                Role = "ScrumMaster",
+                                Role = "Scrum Master",
                                 JoinedAt = PhTime
                             });
                         }
                     }
 
-                    changes.Add($"ScrumMaster: {project.ScrumMasterId} → {dto.ScrumMasterId}");
+                    changes.Add($"Scrum Master: {project.ScrumMasterId} → {dto.ScrumMasterId}");
                     project.ScrumMasterId = dto.ScrumMasterId;
                 }
 
@@ -566,7 +624,41 @@ namespace TaskManagement.Controllers
                         CreatedAt = PhTime
                     });
                 }
+                if (changes.Any())
+                {
+                    var pmAcc = await _context.Accounts.FindAsync(project.ProjectManagerId);
+                    if (pmAcc?.Email != null)
+                    {
+                        await _emailService.SendEmailAsync(
+                            pmAcc.Email,
+                            $"Project Updated: {project.Name}",
+                            $@"<h2>Project Update Notification</h2>
+                           <p>Hello <strong>{pmAcc.Name}</strong>,</p>
+                           <p>The project <strong>{project.Name}</strong> has been updated by <strong>{requester.Name}</strong>.</p>
+                           <p><strong>Changes:</strong></p>
+                           <ul>{string.Join("", changes.Select(c => $"<li>{c}</li>"))}</ul>
+                           <p>Please log in to review the changes.</p>"
+                        );
+                    }
 
+                    if (project.ScrumMasterId.HasValue && project.ScrumMasterId != project.ProjectManagerId)
+                    {
+                        var smAcc = await _context.Accounts.FindAsync(project.ScrumMasterId.Value);
+                        if (smAcc?.Email != null)
+                        {
+                            await _emailService.SendEmailAsync(
+                                smAcc.Email,
+                                $"Project Updated: {project.Name}",
+                                $@"<h2>Project Update Notification</h2>
+                               <p>Hello <strong>{smAcc.Name}</strong>,</p>
+                               <p>The project <strong>{project.Name}</strong> has been updated by <strong>{requester.Name}</strong>.</p>
+                               <p><strong>Changes:</strong></p>
+                               <ul>{string.Join("", changes.Select(c => $"<li>{c}</li>"))}</ul>
+                               <p>Please log in to review the changes.</p>"
+                            );
+                        }
+                    }
+                }
                 await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -759,8 +851,8 @@ namespace TaskManagement.Controllers
                     .FirstOrDefaultAsync(m => m.ProjectId == id && m.AccountId == accountId && !m.IsDeleted);
 
                 var isAdmin = account.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                 if (!isAdmin && !isProjectManager)
                     return StatusCode(403, "Access denied. Admins and ProjectManagers only.");
@@ -889,8 +981,8 @@ namespace TaskManagement.Controllers
                 var projectMemberRole = account.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
                 
                 var isAdmin = account.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                 if (!isAdmin && !isProjectManager)
                     return StatusCode(403, "Access denied. Admins and ProjectManagers only.");
