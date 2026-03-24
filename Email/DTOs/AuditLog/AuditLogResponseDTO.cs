@@ -6,6 +6,8 @@
         public int? TaskId { get; set; }
         public int? ProjectId { get; set; }
         public int AccountId { get; set; }
+        public string? AccountName { get; set; }
+        public string? AccountEmail { get; set; }
         public string Action { get; set; } = string.Empty;
         public string? OldValue { get; set; }
         public string? NewValue { get; set; }

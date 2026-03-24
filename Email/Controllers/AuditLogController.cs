@@ -42,6 +42,14 @@ namespace TaskManagement.Controllers
                         : null),
                 TaskId = l.TaskId,
                 AccountId = l.AccountId,
+                AccountName = _context.Accounts
+                    .Where(a => a.Id == l.AccountId)
+                    .Select(a => a.Name)
+                    .FirstOrDefault(),
+                AccountEmail = _context.Accounts
+                    .Where(a => a.Id == l.AccountId)
+                    .Select(a => a.Email)
+                    .FirstOrDefault(),
                 Action = l.Action,
                 OldValue = l.OldValue,
                 NewValue = l.NewValue,
@@ -50,16 +58,35 @@ namespace TaskManagement.Controllers
             });
         }
         private async Task<List<AuditLogResponseDTO>> FetchAllLogsAsync(
-            DateTime? from = null,
-            DateTime? to = null)
+             int? userId = null,
+             string? role = null,
+             int? projectId = null,
+             string? action = null,
+             DateTime? from = null,
+             DateTime? to = null)
         {
             var query = _context.AuditLogs.AsQueryable();
+
+            if (userId.HasValue)
+                query = query.Where(l => l.AccountId == userId.Value);
+
+            if (!string.IsNullOrEmpty(role))
+                query = query.Where(l => _context.Accounts
+                    .Where(a => a.Id == l.AccountId)
+                    .Select(a => a.Role)
+                    .FirstOrDefault() == role);
+
+            if (projectId.HasValue)
+                query = query.Where(l => l.ProjectId == projectId.Value);
+
+            if (!string.IsNullOrEmpty(action))
+                query = query.Where(l => l.Action == action);
 
             if (from.HasValue)
                 query = query.Where(l => l.CreatedAt >= from.Value);
 
             if (to.HasValue)
-                query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1)); // end of 'to' day
+                query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
 
             return await BuildLogQuery(
                 query.OrderByDescending(l => l.CreatedAt)
@@ -116,14 +143,28 @@ namespace TaskManagement.Controllers
         }
 
         [HttpGet("GetAllLogs")]
-        public async Task<IActionResult> GetAllLogs([FromQuery] int requesterId)
+        public async Task<IActionResult> GetAllLogs(
+             [FromQuery] int requesterId,
+             [FromQuery] int? user_id = null,
+             [FromQuery] string? role = null,
+             [FromQuery] int? project_id = null,
+             [FromQuery] string? action = null,
+             [FromQuery] DateTime? from = null,
+             [FromQuery] DateTime? to = null)
         {
             try
             {
                 var (ok, error) = await GuardAdminAsync(requesterId);
                 if (!ok) return error!;
 
-                var logs = await FetchAllLogsAsync();
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                var logs = await FetchAllLogsAsync(user_id, role, project_id, action, from, to);
+                    
+                if (!logs.Any())
+                    return NotFound("No audit logs found for the given filters.");
+
                 return Ok(logs);
             }
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
@@ -169,9 +210,13 @@ namespace TaskManagement.Controllers
 
         [HttpGet("ExportExcel")]
         public async Task<IActionResult> ExportExcel(
-             [FromQuery] int requesterId,
-             [FromQuery] DateTime? from = null,
-             [FromQuery] DateTime? to = null)
+            [FromQuery] int requesterId,
+            [FromQuery] int? user_id = null,
+            [FromQuery] string? role = null,
+            [FromQuery] int? project_id = null,
+            [FromQuery] string? action = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
         {
             try
             {
@@ -181,7 +226,7 @@ namespace TaskManagement.Controllers
                 if (from.HasValue && to.HasValue && to.Value < from.Value)
                     return BadRequest("'to' date must be on or after 'from' date.");
 
-                var logs = await FetchAllLogsAsync(from, to);
+                var logs = await FetchAllLogsAsync(user_id, role, project_id, action, from, to);
 
                 using var workbook = new XLWorkbook();
                 var sheet = workbook.Worksheets.Add("Audit Logs");
@@ -250,9 +295,13 @@ namespace TaskManagement.Controllers
 
         [HttpGet("ExportPdf")]
         public async Task<IActionResult> ExportPdf(
-     [FromQuery] int requesterId,
-     [FromQuery] DateTime? from = null,
-     [FromQuery] DateTime? to = null)
+             [FromQuery] int requesterId,
+             [FromQuery] int? user_id = null,
+             [FromQuery] string? role = null,
+             [FromQuery] int? project_id = null,
+             [FromQuery] string? action = null,
+             [FromQuery] DateTime? from = null,
+             [FromQuery] DateTime? to = null)
         {
             try
             {
@@ -262,17 +311,16 @@ namespace TaskManagement.Controllers
                 if (from.HasValue && to.HasValue && to.Value < from.Value)
                     return BadRequest("'to' date must be on or after 'from' date.");
 
-                var logs = await FetchAllLogsAsync(from, to);
+                var logs = await FetchAllLogsAsync(user_id, role, project_id, action, from, to);
+
 
                 using var stream = new MemoryStream();
 
-                // Landscape A4 with tight margins to fit 10 columns
                 var document = new Document(PageSize.A4.Rotate(), 15f, 15f, 20f, 20f);
                 var writer = PdfWriter.GetInstance(document, stream);
                 writer.CloseStream = false;
                 document.Open();
 
-                // ── Title ─────────────────────────────────────────────────────────
                 var titleFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.DARK_GRAY);
                 var subtitleFont = FontFactory.GetFont(FontFactory.HELVETICA, 9, BaseColor.GRAY);
 
@@ -282,7 +330,6 @@ namespace TaskManagement.Controllers
                     SpacingAfter = 4f
                 });
 
-                // ── Date range subtitle ───────────────────────────────────────────
                 var rangeLabel = (from.HasValue || to.HasValue)
                     ? $"Date Range: {(from.HasValue ? from.Value.ToString("yyyy-MM-dd") : "Start")} → {(to.HasValue ? to.Value.ToString("yyyy-MM-dd") : "End")}"
                     : $"Date Range: All  |  Exported: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC";
@@ -293,7 +340,6 @@ namespace TaskManagement.Controllers
                     SpacingAfter = 12f
                 });
 
-                // ── Table — 10 columns matching Excel ─────────────────────────────
                 var table = new PdfPTable(10) { WidthPercentage = 100 };
                 table.SetWidths(new float[] { 3f, 5f, 10f, 9f, 5f, 7f, 9f, 9f, 14f, 9f });
                 //                            ID  ProjId  ProjName  Role  AccId  Action  OldVal  NewVal  Note  CreatedAt
@@ -303,7 +349,6 @@ namespace TaskManagement.Controllers
                 var cellFont = FontFactory.GetFont(FontFactory.HELVETICA, 6, BaseColor.BLACK);
                 var altBg = new BaseColor(238, 243, 251);
 
-                // ── Headers ───────────────────────────────────────────────────────
                 foreach (var h in new[]
                 {
             "ID", "Project ID", "Project Name", "Project Role",

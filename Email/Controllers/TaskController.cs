@@ -203,10 +203,10 @@ namespace TaskManagement.Controllers
 
         [HttpGet("CheckAssigneeWorkload")]
         public async Task<IActionResult> CheckAssigneeWorkload(
-    [FromQuery] DateTime startDate,
-    [FromQuery] int storyPoints,
-    [FromQuery] List<int> assigneeIds,
-    [FromQuery] int projectId)
+            [FromQuery] DateTime startDate,
+            [FromQuery] int storyPoints,
+            [FromQuery] List<int> assigneeIds,
+            [FromQuery] int projectId)
         {
             var validStoryPoints = new[] { 1, 2, 3, 5, 8, 13, 21 };
             if (!validStoryPoints.Contains(storyPoints))
@@ -218,7 +218,6 @@ namespace TaskManagement.Controllers
             if (!assigneeIds.Any())
                 return Ok(new { warnings = Array.Empty<object>() });
 
-            // Calculate what the due date WOULD be
             var projectedDueDate = BusinessDayHelper.CalculateDueDateFromStoryPoints(startDate, storyPoints);
             var newTaskHours = BusinessDayHelper.GetHoursForStoryPoints(storyPoints);
 
@@ -228,7 +227,6 @@ namespace TaskManagement.Controllers
             {
                 var account = await _context.Accounts.FindAsync(accountId);
 
-                // Find existing tasks that overlap with the projected start→due window
                 var overlappingHours = await _context.TaskAssignments
                     .Where(a =>
                         a.AccountId == accountId &&
@@ -373,10 +371,10 @@ namespace TaskManagement.Controllers
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = creatorId,
-                        Action = "PATCH",
+                        Action = "UPDATED",
                         OldValue = "Not Started",
                         NewValue = "Active",
-                        Note = $"Project set to Active because a task was created by {creator.Name} ({creatorRole})",
+                        Note = $"Project '{project.Name}' set to Active because a task was created by {creator.Name} ({creatorRole}).",
 						CreatedAt = PhTime
 					});
                 }
@@ -410,11 +408,11 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = creatorId,
-                    Action = "POST",
+                    Action = "CREATED",
                     NewValue = task.Title,
                     Note = dto.ParentTaskId == null
-                        ? $"Task created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}"
-                        : $"Subtask created by {creator.Name} ({creatorRole}). Due date auto-calculated: {calculatedDueDate:yyyy-MM-dd HH:mm}",
+                        ? $"Task created '{task.Title}' by {creator.Name} ({creatorRole})."
+                        : $"Subtask created'{task.Title}' by {creator.Name} ({creatorRole}).",
 
 					CreatedAt = PhTime
 				});
@@ -560,9 +558,9 @@ namespace TaskManagement.Controllers
                         ProjectId = task.ProjectId,
                         TaskId = task.Id,
                         AccountId = updaterId,
-                        Action = "PATCH",
+                        Action = "UPDATED",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Task updated by {updater.Name} ({updaterProjectRole})",
+                        Note = $"Task updated '{task.Title}' by {updater.Name} ({updaterProjectRole}).",
 						CreatedAt = PhTime
 					});
                 }
@@ -633,10 +631,10 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
-                    Action = "PATCH",
+                    Action = "UPDATED",
                     OldValue = oldStatusName,
                     NewValue = newStatusName,
-                    Note = $"Status changed from {oldStatusName} to {newStatusName} by {requester.Name} ({requesterProjectRole})",
+                    Note = $"Updated status of task '{task.Title}' to {newStatusName} by {requester.Name} ({requesterProjectRole}).",
 					CreatedAt = PhTime
 				});
                 var assigneeIds = await _context.TaskAssignments
@@ -716,9 +714,9 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = deleterId,
-                    Action = "DELETE",
+                    Action = "DELETED",
                     OldValue = task.Title,
-                    Note = $"Task and all subtasks deleted by {deleter.Name} ({deleterRole})",
+                    Note = $"Task '{task.Title}' and all subtasks deleted by {deleter.Name} ({deleterRole}).",
 					CreatedAt = PhTime
 				});
 
@@ -839,9 +837,9 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = id,
                     AccountId = dto.AssignedById,
-                    Action = "PATCH",
+                    Action = "UPDATED",
                     NewValue = string.Join(", ", dto.AssigneeIds),
-                    Note = $"Task assigned by {assigner.Name} ({assignerProjectRole})",
+                    Note = $"Task '{task.Title}' assigned by {assigner.Name} ({assignerProjectRole}).",
 					CreatedAt = PhTime
 				});
 
@@ -1056,9 +1054,9 @@ namespace TaskManagement.Controllers
                     ProjectId = task.ProjectId,
                     TaskId = task.Id,
                     AccountId = requesterId,
-                    Action = "RESTORE",
+                    Action = "RESTORED",
                     NewValue = task.Title,
-                    Note = $"Task and all subtasks reactivated by {requester.Name} ({requesterRole})",
+                    Note = $"Task and all subtasks reactivated by {requester.Name} ({requesterRole}).",
 					CreatedAt = PhTime
 				});
 

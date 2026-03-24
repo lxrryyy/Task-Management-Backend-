@@ -128,9 +128,9 @@ namespace TaskManagement.Controllers
             _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
-                Action = "AccountCreated",
+                Action = "CREATED",
                 NewValue = newAccount.Name,
-                Note = $"Account created by {admin.Name}, ({admin.Role})",
+                Note = $"User {newAccount.Name} was created by {admin.Name}.",
                 CreatedAt = PhTime
             });
             return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, newAccount);
@@ -235,8 +235,8 @@ namespace TaskManagement.Controllers
             _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = account.Id,
-                Action = "Profile Picture Removed",
-                Note = $"Profile picture removed by {account.Name}, {account.Role}",
+                Action = "DELETED",
+                Note = $"Profile picture removed by {account.Name}, {account.Role}.",
                 CreatedAt = PhTime
             });
             await _context.SaveChangesAsync();
@@ -260,8 +260,8 @@ namespace TaskManagement.Controllers
             _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
-                Action = "Account Deleted",
-                Note = $"Account deleted by {admin.Name}, ({admin.Role})",
+                Action = "DELETED",
+                Note = $"User {existingAccount.Name} was deactivated by {admin.Name}.",
                 CreatedAt = PhTime
             });
 
@@ -285,8 +285,8 @@ namespace TaskManagement.Controllers
             _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
-                Action = "Account Reactivated",
-                Note = $"Account Reactivated by {admin.Name}, ({admin.Role})",
+                Action = "RESTORED",
+                Note = $"Account Reactivated by {admin.Name}.",
                 CreatedAt = PhTime
             });
 

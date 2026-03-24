@@ -356,9 +356,9 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = creatorId,
-                    Action = "POST",
+                    Action = "CREATED",
                     NewValue = project.Name,
-                    Note = $"Project created by {creator.Name}",
+                    Note = $"Created project '{project.Name}' by {creator.Name}.",
                     CreatedAt = PhTime
                 });
                 await _context.SaveChangesAsync();
@@ -618,9 +618,9 @@ namespace TaskManagement.Controllers
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = requesterId,
-                        Action = "PATCH",
+                        Action = "UPDATED",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Project updated by {requester.Name} ({requesterRole})",
+                        Note = $"Project updated '{project.Name}'by {requester.Name} ({requesterRole}).",
                         CreatedAt = PhTime
                     });
                 }
@@ -902,9 +902,9 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "DELETE",
+                    Action = "DELETED",
                     OldValue = project.Name,
-                    Note = $"Project deleted by {account.Name} ({deleterRole})",
+                    Note = $"Project '{project.Name}' deleted by {account.Name} ({deleterRole}).",
                     CreatedAt = PhTime
                 });
 

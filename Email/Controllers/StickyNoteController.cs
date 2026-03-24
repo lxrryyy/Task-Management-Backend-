@@ -1,5 +1,7 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using DocumentFormat.OpenXml.InkML;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.Channels;
 using TaskManagement.Data;
 using TaskManagement.DTOs.StickyNote;
 using TaskManagement.Models;
@@ -105,8 +107,18 @@ namespace TaskManagement.Controllers
                 };
 
                 _context.StickyNotes.Add(note);
+
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = accountId,
+                    Action = "CREATED",
+                    Note = $"User {account.Name} created a note.",
+                    CreatedAt = PhTime
+                });
+
                 await _context.SaveChangesAsync();
 
+                
                 return CreatedAtAction(nameof(GetNoteById), new { id = note.Id }, new StickyNoteResponseDTO
                 {
                     Id = note.Id,
@@ -131,7 +143,7 @@ namespace TaskManagement.Controllers
             {
                 var note = await _context.StickyNotes
                     .FirstOrDefaultAsync(n => n.Id == id && n.AccountId == accountId && !n.IsDeleted);
-
+                var account = await _context.Accounts.FindAsync(accountId);
                 if (note == null)
                     return NotFound("Note not found.");
 
@@ -146,6 +158,16 @@ namespace TaskManagement.Controllers
                     note.IsPinned = dto.IsPinned.Value;
 
                 note.UpdatedAt = PhTime;
+
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = accountId,
+                    Action = "UPDATED",
+                    OldValue = note.Content,       
+                    NewValue = dto.Content ?? note.Content,
+                    Note = $"User {account.Name} updated sticky note.",
+                    CreatedAt = PhTime
+                });
 
                 await _context.SaveChangesAsync();
 
@@ -174,6 +196,7 @@ namespace TaskManagement.Controllers
             {
                 var note = await _context.StickyNotes
                     .FirstOrDefaultAsync(n => n.Id == id && n.AccountId == accountId && !n.IsDeleted);
+                var account = await _context.Accounts.FindAsync(accountId);
 
                 if (note == null)
                     return NotFound("Note not found.");
@@ -181,6 +204,14 @@ namespace TaskManagement.Controllers
                 note.IsDeleted = true;
                 note.DeletedAt = PhTime;
                 note.UpdatedAt = PhTime;
+
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = accountId,
+                    Action = "DELETED",
+                    Note = $"User {account.Name} deleted sticky note ID.",
+                    CreatedAt = PhTime
+                });
 
                 await _context.SaveChangesAsync();
 
