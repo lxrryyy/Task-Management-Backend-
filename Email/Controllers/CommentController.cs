@@ -1,8 +1,9 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TaskManagement.Data;
-using TaskManagement.Models;
 using TaskManagement.DTOs.Comment;
+using TaskManagement.Models;
+using TaskManagement.Services;
 namespace TaskManagement.Controllers
 {
     [Route("api/[controller]")]
@@ -10,11 +11,14 @@ namespace TaskManagement.Controllers
     public class TaskCommentController : ControllerBase
     {
         private readonly AccountDbContext _context;
+        private readonly IEmailService _emailService;
+
         private static DateTime PhTime =>
              TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
-        public TaskCommentController(AccountDbContext context)
+        public TaskCommentController(AccountDbContext context, IEmailService emailService)
         {
             _context = context;
+            _emailService = emailService;
         }
 
         [HttpGet("GetCommentsByTask/{taskId}")]
@@ -89,9 +93,45 @@ namespace TaskManagement.Controllers
                     Note = $"User {account.Name} leaves a comment on task {dto.TaskId}.",
                     CreatedAt = PhTime
                 });
+                var projectMembers = await _context.ProjectMembers
+                     .Where(m => m.ProjectId == task.ProjectId && m.AccountId != accountId && !m.IsDeleted)
+                     .ToListAsync();
 
+                foreach (var member in projectMembers)
+                {
+                    _context.Notifications.Add(new Notification
+                    {
+                        AccountId = member.AccountId,
+                        ProjectId = task.ProjectId,
+                        TaskId = dto.TaskId,
+                        Message = $"{account.Name} commented on task \"{task.Title}\"",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                   
+                }
                 await _context.SaveChangesAsync();
+                var recipientIds = await _context.TaskAssignments
+                    .Where(a => a.TaskId == dto.TaskId && !a.IsDeleted && a.AccountId != accountId)
+                    .Select(a => a.AccountId)
+                    .ToListAsync();
 
+                if (task.CreatorId != accountId && !recipientIds.Contains(task.CreatorId))
+                    recipientIds.Add(task.CreatorId);
+
+                var recipients = await _context.Accounts
+                    .Where(a => recipientIds.Contains(a.Id))
+                    .ToListAsync();
+
+                foreach (var recipient in recipients)
+                {
+                    await _emailService.SendCommentNotificationAsync(
+                        recipient.Email,
+                        recipient.Name,
+                        account.Name,
+                        task.Title,
+                        dto.Content
+                    );
+                }
                 return CreatedAtAction(nameof(GetCommentsByTask), new { taskId = dto.TaskId }, new
                 {
                     comment.Id,
@@ -124,9 +164,25 @@ namespace TaskManagement.Controllers
                 if (comment.AccountId != accountId && account.Role != "Admin")
                     return StatusCode(403, "You can only edit your own comments.");
 
+                var task = await _context.Tasks.FindAsync(comment.TaskId);
+
                 comment.Content = dto.Content;
                 comment.UpdatedAt = DateTime.UtcNow;
+                var projectMembers = await _context.ProjectMembers
+                    .Where(m => m.ProjectId == task.ProjectId && m.AccountId != accountId && !m.IsDeleted)
+                    .ToListAsync();
 
+                foreach (var member in projectMembers)
+                {
+                    _context.Notifications.Add(new Notification
+                    {
+                        AccountId = member.AccountId,
+                        ProjectId = task.ProjectId,
+                        TaskId = comment.TaskId,
+                        Message = $"{account.Name} updated a comment on task \"{task.Title}\"",
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
                 await _context.SaveChangesAsync();
                 return NoContent();
             }

@@ -14,7 +14,6 @@ namespace TaskManagement.Data
         public DbSet<TaskItem> Tasks { get; set; }
         public DbSet<TaskAssignment> TaskAssignments { get; set; }
         public DbSet<TaskComment> TaskComments { get; set; }
-        public DbSet<TaskPermission> TaskPermissions { get; set; }
         public DbSet<Notification> Notifications { get; set; }
         public DbSet<AuditLog> AuditLogs { get; set; }
         // Project Management

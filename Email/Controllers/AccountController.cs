@@ -202,6 +202,15 @@ namespace TaskManagement.Controllers
             existingAccount.UpdatedAt = PhTime;
             await _context.SaveChangesAsync();
 
+            _context.AuditLogs.Add(new AuditLog
+            {
+                AccountId = id,
+                Action = "Updated",
+                NewValue = string.Join(", ", changes),
+                Note = $"Account updated by {existingAccount.Name} ({existingAccount.Role})"
+            });
+            await _context.SaveChangesAsync();
+
             var updatedFieldNames = changes
                 .Select(c => c.Split(':')[0].Trim())  
                 .ToList();
@@ -224,6 +233,7 @@ namespace TaskManagement.Controllers
                 }
             });
         }
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> RemoveProfilePicture(int id)
         {

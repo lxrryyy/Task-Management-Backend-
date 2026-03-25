@@ -46,6 +46,30 @@ namespace TaskManagement.Services
 
             await SendEmailAsync(to, subject, body);
         }
+        public async Task SendCommentNotificationAsync(string toEmail, string recipientName, string commenterName, string taskTitle, string commentContent)
+        {
+            var subject = $"💬 New Comment on Task: {taskTitle}";
+            var body = $@"
+                <div style='font-family: Segoe UI, Arial, sans-serif; max-width: 600px; margin: 40px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
+                    <div style='background: #4F46E5; padding: 28px 32px;'>
+                        <h1 style='color: #fff; margin: 0; font-size: 20px;'>💬 New Comment on Your Task</h1>
+                    </div>
+                    <div style='padding: 32px; color: #333;'>
+                        <p style='font-size: 15px;'>Hello <strong>{recipientName}</strong>,</p>
+                        <p style='font-size: 15px;'><strong>{commenterName}</strong> left a comment on task <strong>{taskTitle}</strong>.</p>
+                        <div style='background: #f8f9fc; border-left: 4px solid #4F46E5; border-radius: 4px; padding: 14px 18px; margin: 20px 0;'>
+                            <p style='margin: 6px 0; font-size: 14px;'><strong style='color: #666;'>Task:</strong> {taskTitle}</p>
+                            <p style='margin: 6px 0; font-size: 14px;'><strong style='color: #666;'>Comment:</strong> {commentContent}</p>
+                        </div>
+                        <p style='font-size: 15px;'>Please log in to view and reply to the comment.</p>
+                    </div>
+                    <div style='background: #f4f6f9; padding: 18px 32px; text-align: center; font-size: 12px; color: #aaa; border-top: 1px solid #e8eaed;'>
+                        This is an automated message from the Task Management System. Please do not reply.
+                    </div>
+                </div>";
+
+            await SendEmailAsync(toEmail, subject, body);
+        }
         public async Task SendEmailAsync(string toEmail, string subject, string body)
         {
             var smtpHost = _config["Smtp:Host"];
