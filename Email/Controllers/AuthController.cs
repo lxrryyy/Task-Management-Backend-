@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using DocumentFormat.OpenXml.Office2010.Excel;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -63,6 +64,15 @@ namespace TaskManagement.Controllers
 
                 await _context.SaveChangesAsync();
 
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = account.Id,
+                    Action = "Logged in",
+                    Note = $"Account {account.Name} is logged in at {account.UpdatedAt}.",
+                    CreatedAt = PhTime
+                });
+
+                await _context.SaveChangesAsync();
                 return Ok(new
                 {
                     token,
@@ -95,9 +105,22 @@ namespace TaskManagement.Controllers
                 var account = await _context.Accounts
                     .SingleOrDefaultAsync(a => a.ApiToken == token);
 
+                if (account == null)
+                    return Unauthorized("Invalid or expired token.");
+
+                var logoutTime = PhTime;
+
                 account.ApiToken = null;
                 account.TokenExpiresAt = null;
-                account.UpdatedAt = PhTime;
+                account.UpdatedAt = logoutTime;
+
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = account.Id,
+                    Action = "Logged out",
+                    Note = $"Account '{account.Name}' (ID: {account.Id}) logged out at {logoutTime}.",
+                    CreatedAt = logoutTime
+                });
 
                 await _context.SaveChangesAsync();
 

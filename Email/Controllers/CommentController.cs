@@ -90,7 +90,7 @@ namespace TaskManagement.Controllers
                     AccountId = accountId,
                     Action = "CREATED",
                     NewValue = dto.Content,
-                    Note = $"User {account.Name} leaves a comment on task {dto.TaskId}.",
+                    Note = $"User {account.Name} leaves a comment on task {task.Title}.",
                     CreatedAt = PhTime
                 });
                 var projectMembers = await _context.ProjectMembers
