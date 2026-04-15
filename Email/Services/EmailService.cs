@@ -145,5 +145,36 @@ namespace TaskManagement.Services
             ";
             await SendEmailAsync(toEmail, subject, body);
         }
+        public async Task SendAccountCreatedAsync(string email, string name, string password)
+        {
+            var subject = "Welcome to Task Management - Your Account Credentials";
+            var body = $@"
+            <div style='font-family: Arial, sans-serif; max-width: 600px; margin: auto;'>
+                <div style='background-color: #C0392B; padding: 30px; text-align: center;'>
+                    <h1 style='color: white; margin: 0;'>Welcome to TASK MANAGEMENT!</h1>
+                </div>
+                <div style='padding: 30px;'>
+                    <p>Dear {name},</p>
+                    <p>Your account has been created. Here are your login credentials:</p>
+                    <div style='background-color: #f5f5f5; padding: 20px; border-radius: 5px; margin: 20px 0;'>
+                        <p><strong>Your Account Credentials:</strong></p>
+                        <p>Email: <a href='mailto:{email}'>{email}</a></p>
+                        <p>Password: {password}</p>
+                    </div>
+                 <div style='text-align: center; margin: 30px 0;'>
+                    <a href='http://ec2-52-77-117-213.ap-southeast-1.compute.amazonaws.com:1014/login'
+                        style='background-color: #C0392B; color: white; padding: 14px 32px; 
+                               text-decoration: none; border-radius: 5px; font-size: 16px; 
+                               font-weight: bold; display: inline-block;'>
+                        Login to Your Account
+                    </a>
+                </div>
+                    <p>For security reasons, we recommend changing your password after your first login.</p>
+                    <p style='margin-top: 30px;'>If you have any questions, please don't hesitate to contact us.</p>
+                </div>
+            </div>";
+
+            await SendEmailAsync(email, subject, body);
+        }
     }
 }

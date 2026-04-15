@@ -39,7 +39,14 @@ namespace TaskManagement.Controllers
                             .Where(pm => pm.ProjectId == l.ProjectId && pm.AccountId == l.AccountId)
                             .Select(pm => pm.Role)
                             .FirstOrDefault()
-                        : null),
+                            ?? _context.Accounts
+                                .Where(a => a.Id == l.AccountId)
+                                .Select(a => a.Role)
+                                .FirstOrDefault()
+                        : _context.Accounts
+                            .Where(a => a.Id == l.AccountId)
+                            .Select(a => a.Role)
+                            .FirstOrDefault()),
                 TaskId = l.TaskId,
                 AccountId = l.AccountId,
                 AccountName = _context.Accounts
@@ -142,34 +149,6 @@ namespace TaskManagement.Controllers
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
         }
 
-        [HttpGet("GetAllLogs")]
-        public async Task<IActionResult> GetAllLogs(
-             [FromQuery] int requesterId,
-             [FromQuery] int? user_id = null,
-             [FromQuery] string? role = null,
-             [FromQuery] int? project_id = null,
-             [FromQuery] string? action = null,
-             [FromQuery] DateTime? from = null,
-             [FromQuery] DateTime? to = null)
-        {
-            try
-            {
-                var (ok, error) = await GuardAdminAsync(requesterId);
-                if (!ok) return error!;
-
-                if (from.HasValue && to.HasValue && to.Value < from.Value)
-                    return BadRequest("'to' date must be on or after 'from' date.");
-
-                var logs = await FetchAllLogsAsync(user_id, role, project_id, action, from, to);
-                    
-                if (!logs.Any())
-                    return NotFound("No audit logs found for the given filters.");
-
-                return Ok(logs);
-            }
-            catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
-        }
-
         [HttpGet("GetLogsByAction")]
         public async Task<IActionResult> GetLogsByAction([FromQuery] string action, [FromQuery] int requesterId)
         {
@@ -207,13 +186,80 @@ namespace TaskManagement.Controllers
             }
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
         }
+        [HttpGet("GetActionLogs")]
+        public async Task<IActionResult> GetActionLogs(
+           [FromQuery] int requesterId,
+           [FromQuery] int? user_id = null,
+           [FromQuery] string? accountName = null,
+           [FromQuery] string? accountEmail = null,
+           [FromQuery] string? action = null,
+           [FromQuery] DateTime? from = null,
+           [FromQuery] DateTime? to = null)
+        {
+            try
+            {
+                var (ok, error) = await GuardAdminAsync(requesterId);
+                if (!ok) return error!;
 
-        [HttpGet("ExportExcel")]
-        public async Task<IActionResult> ExportExcel(
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                if (action != null && action != "CREATED" && action != "UPDATED" && action != "DELETED")
+                    return BadRequest("Action must be 'CREATED', 'UPDATED', or 'DELETED'.");
+
+                var query = _context.AuditLogs
+                    .Where(l => l.Action == "CREATED" || l.Action == "UPDATED" || l.Action == "DELETED" || l.Action == "RESTORED");
+
+                if (user_id.HasValue)
+                    query = query.Where(l => l.AccountId == user_id.Value);
+
+                if (!string.IsNullOrEmpty(accountName))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Name.Contains(accountName))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(accountEmail))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Email.Contains(accountEmail))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(action))
+                    query = query.Where(l => l.Action == action);
+
+                if (from.HasValue)
+                    query = query.Where(l => l.CreatedAt >= from.Value);
+
+                if (to.HasValue)
+                    query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
+
+                var logs = await BuildLogQuery(
+                    query.OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
+
+                if (!logs.Any())
+                    return NotFound("No action logs found.");
+
+                return Ok(logs);
+            }
+            catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
+        }
+
+        [HttpGet("GetLoginLogoutLogs")]
+        public async Task<IActionResult> GetLoginLogoutLogs(
             [FromQuery] int requesterId,
             [FromQuery] int? user_id = null,
-            [FromQuery] string? role = null,
-            [FromQuery] int? project_id = null,
+            [FromQuery] string? accountName = null,
+            [FromQuery] string? accountEmail = null,
             [FromQuery] string? action = null,
             [FromQuery] DateTime? from = null,
             [FromQuery] DateTime? to = null)
@@ -226,10 +272,391 @@ namespace TaskManagement.Controllers
                 if (from.HasValue && to.HasValue && to.Value < from.Value)
                     return BadRequest("'to' date must be on or after 'from' date.");
 
-                var logs = await FetchAllLogsAsync(user_id, role, project_id, action, from, to);
+                if (action != null && action != "Logged in" && action != "Logged out")
+                    return BadRequest("Action must be either 'Logged in' or 'Logged out'.");
+
+                var query = _context.AuditLogs
+                    .Where(l => l.Action == "Logged in" || l.Action == "Logged out");
+
+                if (user_id.HasValue)
+                    query = query.Where(l => l.AccountId == user_id.Value);
+
+                if (!string.IsNullOrEmpty(accountName))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Name.Contains(accountName))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(accountEmail))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Email.Contains(accountEmail))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(action))
+                    query = query.Where(l => l.Action == action);
+
+                if (from.HasValue)
+                    query = query.Where(l => l.CreatedAt >= from.Value);
+
+                if (to.HasValue)
+                    query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
+
+                var logs = await BuildLogQuery(
+                    query.OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
+
+                if (!logs.Any())
+                    return NotFound("No login/logout logs found.");
+
+                return Ok(logs);
+            }
+            catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
+        }
+
+        [HttpGet("ExportLoginLogoutExcel")]
+        public async Task<IActionResult> ExportLoginLogoutExcel(
+            [FromQuery] int requesterId,
+            [FromQuery] int? user_id = null,
+            [FromQuery] string? accountName = null,
+            [FromQuery] string? accountEmail = null,
+            [FromQuery] string? action = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
+        {
+            try
+            {
+                var (ok, error) = await GuardAdminAsync(requesterId);
+                if (!ok) return error!;
+
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                if (action != null && action != "Logged in" && action != "Logged out")
+                    return BadRequest("Action must be either 'Logged in' or 'Logged out'.");
+
+                var query = _context.AuditLogs
+                    .Where(l => l.Action == "Logged in" || l.Action == "Logged out");
+
+                if (user_id.HasValue)
+                    query = query.Where(l => l.AccountId == user_id.Value);
+
+                if (!string.IsNullOrEmpty(accountName))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Name.Contains(accountName))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(accountEmail))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Email.Contains(accountEmail))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(action))
+                    query = query.Where(l => l.Action == action);
+
+                if (from.HasValue)
+                    query = query.Where(l => l.CreatedAt >= from.Value);
+
+                if (to.HasValue)
+                    query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
+
+                var logs = await BuildLogQuery(
+                    query.OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
+
+                if (!logs.Any())
+                    return NotFound("No login/logout logs found for the given filters.");
 
                 using var workbook = new XLWorkbook();
-                var sheet = workbook.Worksheets.Add("Audit Logs");
+                var sheet = workbook.Worksheets.Add("Login Logout Logs");
+
+                var rangeLabel = (from.HasValue || to.HasValue)
+                    ? $"Date Range: {(from.HasValue ? from.Value.ToString("yyyy-MM-dd") : "Start")} → {(to.HasValue ? to.Value.ToString("yyyy-MM-dd") : "End")}"
+                    : "Date Range: All";
+
+                sheet.Cell(1, 1).Value = rangeLabel;
+                sheet.Cell(1, 1).Style.Font.Italic = true;
+                sheet.Cell(1, 1).Style.Font.FontColor = XLColor.DarkGray;
+                sheet.Range(1, 1, 1, 7).Merge(); // was 10, now 7 columns
+
+                var headers = new[]
+                {
+                    "ID", "Account ID", "Account Name", "Account Email", "Action", "Note", "Created At"
+                };
+
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    var cell = sheet.Cell(2, i + 1);
+                    cell.Value = headers[i];
+                    cell.Style.Font.Bold = true;
+                    cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#4F81BD");
+                    cell.Style.Font.FontColor = XLColor.White;
+                    cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
+                }
+
+                for (int i = 0; i < logs.Count; i++)
+                {
+                    var log = logs[i];
+                    int row = i + 3;
+                    sheet.Cell(row, 1).Value = log.Id;
+                    sheet.Cell(row, 2).Value = log.AccountId;
+                    sheet.Cell(row, 3).Value = log.AccountName ?? "-";
+                    sheet.Cell(row, 4).Value = log.AccountEmail ?? "-";
+                    sheet.Cell(row, 5).Value = log.Action;
+                    sheet.Cell(row, 6).Value = log.Note ?? "-";
+                    sheet.Cell(row, 7).Value = log.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
+
+                    if (i % 2 == 1)
+                        sheet.Row(row).Style.Fill.BackgroundColor = XLColor.FromHtml("#EEF3FB");
+                }
+
+                sheet.Columns().AdjustToContents();
+
+                using var stream = new MemoryStream();
+                workbook.SaveAs(stream);
+                stream.Seek(0, SeekOrigin.Begin);
+
+                var fileName = from.HasValue || to.HasValue
+                    ? $"LoginLogoutLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.xlsx"
+                    : $"LoginLogoutLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx";
+
+                return File(stream.ToArray(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    fileName);
+            }
+            catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
+        }
+
+        [HttpGet("ExportLoginLogoutPdf")]
+        public async Task<IActionResult> ExportLoginLogoutPdf(
+            [FromQuery] int requesterId,
+            [FromQuery] int? user_id = null,
+            [FromQuery] string? accountName = null,
+            [FromQuery] string? accountEmail = null,
+            [FromQuery] string? action = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
+        {
+            try
+            {
+                var (ok, error) = await GuardAdminAsync(requesterId);
+                if (!ok) return error!;
+
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                if (action != null && action != "Logged in" && action != "Logged out")
+                    return BadRequest("Action must be either 'Logged in' or 'Logged out'.");
+
+                var query = _context.AuditLogs
+                    .Where(l => l.Action == "Logged in" || l.Action == "Logged out");
+
+                if (user_id.HasValue)
+                    query = query.Where(l => l.AccountId == user_id.Value);
+
+                if (!string.IsNullOrEmpty(accountName))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Name.Contains(accountName))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(accountEmail))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Email.Contains(accountEmail))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(action))
+                    query = query.Where(l => l.Action == action);
+
+                if (from.HasValue)
+                    query = query.Where(l => l.CreatedAt >= from.Value);
+
+                if (to.HasValue)
+                    query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
+
+                var logs = await BuildLogQuery(
+                    query.OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
+
+                if (!logs.Any())
+                    return NotFound("No login/logout logs found for the given filters.");
+
+                using var stream = new MemoryStream();
+                var document = new Document(PageSize.A4.Rotate(), 15f, 15f, 20f, 20f);
+                var writer = PdfWriter.GetInstance(document, stream);
+                writer.CloseStream = false;
+                document.Open();
+
+                var titleFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.DARK_GRAY);
+                var subtitleFont = FontFactory.GetFont(FontFactory.HELVETICA, 9, BaseColor.GRAY);
+
+                document.Add(new Paragraph("Login / Logout Report", titleFont)
+                {
+                    Alignment = Element.ALIGN_CENTER,
+                    SpacingAfter = 4f
+                });
+
+                var rangeLabel = (from.HasValue || to.HasValue)
+                    ? $"Date Range: {(from.HasValue ? from.Value.ToString("yyyy-MM-dd") : "Start")} → {(to.HasValue ? to.Value.ToString("yyyy-MM-dd") : "End")}"
+                    : $"Date Range: All  |  Exported: {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC";
+
+                document.Add(new Paragraph(rangeLabel, subtitleFont)
+                {
+                    Alignment = Element.ALIGN_CENTER,
+                    SpacingAfter = 12f
+                });
+
+                var table = new PdfPTable(7) { WidthPercentage = 100 };
+                table.SetWidths(new float[] { 4f, 6f, 12f, 16f, 8f, 18f, 11f });
+                //                            ID  AccId AccName AccEmail Action Note  CreatedAt
+
+                var headerBg = new BaseColor(79, 129, 189);
+                var headerFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 7, BaseColor.WHITE);
+                var cellFont = FontFactory.GetFont(FontFactory.HELVETICA, 6, BaseColor.BLACK);
+                var altBg = new BaseColor(238, 243, 251);
+
+                foreach (var h in new[]
+                {
+                    "ID", "Account ID", "Account Name", "Account Email", "Action", "Note", "Created At"
+                })
+                {
+                    table.AddCell(new PdfPCell(new Phrase(h, headerFont))
+                    {
+                        BackgroundColor = headerBg,
+                        HorizontalAlignment = Element.ALIGN_CENTER,
+                        VerticalAlignment = Element.ALIGN_MIDDLE,
+                        Padding = 4f
+                    });
+                }
+
+                for (int i = 0; i < logs.Count; i++)
+                {
+                    var log = logs[i];
+                    var bg = i % 2 == 1 ? altBg : BaseColor.WHITE;
+
+                    foreach (var v in new[]
+                    {
+                        log.Id.ToString(),
+                        log.AccountId.ToString(),
+                        log.AccountName  ?? "-",
+                        log.AccountEmail ?? "-",
+                        log.Action,
+                        log.Note         ?? "-",
+                        log.CreatedAt.ToString("yyyy-MM-dd HH:mm")
+                    })
+                    {
+                        table.AddCell(new PdfPCell(new Phrase(v, cellFont))
+                        {
+                            BackgroundColor = bg,
+                            Padding = 3f,
+                            VerticalAlignment = Element.ALIGN_MIDDLE
+                        });
+                    }
+                }
+
+                document.Add(table);
+                document.Close();
+                stream.Seek(0, SeekOrigin.Begin);
+
+                var fileName = from.HasValue || to.HasValue
+                    ? $"LoginLogoutLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.pdf"
+                    : $"LoginLogoutLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+                return File(stream.ToArray(), "application/pdf", fileName);
+            }
+            catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
+        }
+
+        [HttpGet("ExportActionLogsExcel")]
+        public async Task<IActionResult> ExportActionLogsExcel(
+            [FromQuery] int requesterId,
+            [FromQuery] int? user_id = null,
+            [FromQuery] string? accountName = null,
+            [FromQuery] string? accountEmail = null,
+            [FromQuery] string? action = null,
+            [FromQuery] DateTime? from = null,
+            [FromQuery] DateTime? to = null)
+        {
+            try
+            {
+                var (ok, error) = await GuardAdminAsync(requesterId);
+                if (!ok) return error!;
+
+                if (from.HasValue && to.HasValue && to.Value < from.Value)
+                    return BadRequest("'to' date must be on or after 'from' date.");
+
+                if (action != null && action != "CREATED" && action != "UPDATED" && action != "DELETED" && action != "RESTORED")
+                    return BadRequest("Action must be 'CREATED', 'UPDATED', 'DELETED', or 'RESTORED'.");
+
+                var query = _context.AuditLogs
+                    .Where(l => l.Action == "CREATED" || l.Action == "UPDATED" || l.Action == "DELETED" || l.Action == "RESTORED");
+
+                if (user_id.HasValue)
+                    query = query.Where(l => l.AccountId == user_id.Value);
+
+                if (!string.IsNullOrEmpty(accountName))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Name.Contains(accountName))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(accountEmail))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Email.Contains(accountEmail))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(action))
+                    query = query.Where(l => l.Action == action);
+
+                if (from.HasValue)
+                    query = query.Where(l => l.CreatedAt >= from.Value);
+
+                if (to.HasValue)
+                    query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
+
+                var logs = await BuildLogQuery(
+                    query.OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
+
+                if (!logs.Any())
+                    return NotFound("No action logs found for the given filters.");
+
+                using var workbook = new XLWorkbook();
+                var sheet = workbook.Worksheets.Add("Action Logs");
 
                 var rangeLabel = (from.HasValue || to.HasValue)
                     ? $"Date Range: {(from.HasValue ? from.Value.ToString("yyyy-MM-dd") : "Start")} → {(to.HasValue ? to.Value.ToString("yyyy-MM-dd") : "End")}"
@@ -242,9 +669,12 @@ namespace TaskManagement.Controllers
 
                 var headers = new[]
                 {
-                    "ID", "Project ID", "Project Name", "Project Role",
-                    "Account ID", "Action", "Old Value", "New Value", "Note", "Created At"
-                };
+            "ID", "Project ID", "Project Name", "Project Role",
+            "Account ID", "Account Name", "Account Email", "Action", "Old Value", "New Value", "Note", "Created At"
+        };
+
+                // 12 columns — update merge range too
+                sheet.Range(1, 1, 1, 12).Merge();
 
                 for (int i = 0; i < headers.Length; i++)
                 {
@@ -265,11 +695,13 @@ namespace TaskManagement.Controllers
                     sheet.Cell(row, 3).Value = log.ProjectName ?? "-";
                     sheet.Cell(row, 4).Value = log.ProjectRole ?? "-";
                     sheet.Cell(row, 5).Value = log.AccountId;
-                    sheet.Cell(row, 6).Value = log.Action;
-                    sheet.Cell(row, 7).Value = log.OldValue ?? "-";
-                    sheet.Cell(row, 8).Value = log.NewValue ?? "-";
-                    sheet.Cell(row, 9).Value = log.Note ?? "-";
-                    sheet.Cell(row, 10).Value = log.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
+                    sheet.Cell(row, 6).Value = log.AccountName ?? "-";
+                    sheet.Cell(row, 7).Value = log.AccountEmail ?? "-";
+                    sheet.Cell(row, 8).Value = log.Action;
+                    sheet.Cell(row, 9).Value = log.OldValue ?? "-";
+                    sheet.Cell(row, 10).Value = log.NewValue ?? "-";
+                    sheet.Cell(row, 11).Value = log.Note ?? "-";
+                    sheet.Cell(row, 12).Value = log.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss");
 
                     if (i % 2 == 1)
                         sheet.Row(row).Style.Fill.BackgroundColor = XLColor.FromHtml("#EEF3FB");
@@ -282,8 +714,8 @@ namespace TaskManagement.Controllers
                 stream.Seek(0, SeekOrigin.Begin);
 
                 var fileName = from.HasValue || to.HasValue
-                    ? $"AuditLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.xlsx"
-                    : $"AuditLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx";
+                    ? $"ActionLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.xlsx"
+                    : $"ActionLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx";
 
                 return File(stream.ToArray(),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -292,13 +724,12 @@ namespace TaskManagement.Controllers
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
         }
 
-
-        [HttpGet("ExportPdf")]
-        public async Task<IActionResult> ExportPdf(
+        [HttpGet("ExportActionLogsPdf")]
+        public async Task<IActionResult> ExportActionLogsPdf(
              [FromQuery] int requesterId,
              [FromQuery] int? user_id = null,
-             [FromQuery] string? role = null,
-             [FromQuery] int? project_id = null,
+             [FromQuery] string? accountName = null,
+             [FromQuery] string? accountEmail = null,
              [FromQuery] string? action = null,
              [FromQuery] DateTime? from = null,
              [FromQuery] DateTime? to = null)
@@ -311,11 +742,50 @@ namespace TaskManagement.Controllers
                 if (from.HasValue && to.HasValue && to.Value < from.Value)
                     return BadRequest("'to' date must be on or after 'from' date.");
 
-                var logs = await FetchAllLogsAsync(user_id, role, project_id, action, from, to);
+                if (action != null && action != "CREATED" && action != "UPDATED" && action != "DELETED" && action != "RESTORED")
+                    return BadRequest("Action must be 'CREATED', 'UPDATED', 'DELETED', or 'RESTORED'.");
 
+                var query = _context.AuditLogs
+                    .Where(l => l.Action == "CREATED" || l.Action == "UPDATED" || l.Action == "DELETED" || l.Action == "RESTORED");
+
+                if (user_id.HasValue)
+                    query = query.Where(l => l.AccountId == user_id.Value);
+
+                if (!string.IsNullOrEmpty(accountName))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Name.Contains(accountName))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(accountEmail))
+                {
+                    var matchedIds = await _context.Accounts
+                        .Where(a => a.Email.Contains(accountEmail))
+                        .Select(a => a.Id)
+                        .ToListAsync();
+                    query = query.Where(l => matchedIds.Contains(l.AccountId));
+                }
+
+                if (!string.IsNullOrEmpty(action))
+                    query = query.Where(l => l.Action == action);
+
+                if (from.HasValue)
+                    query = query.Where(l => l.CreatedAt >= from.Value);
+
+                if (to.HasValue)
+                    query = query.Where(l => l.CreatedAt <= to.Value.Date.AddDays(1).AddTicks(-1));
+
+                var logs = await BuildLogQuery(
+                    query.OrderByDescending(l => l.CreatedAt)
+                ).ToListAsync();
+
+                if (!logs.Any())
+                    return NotFound("No action logs found for the given filters.");
 
                 using var stream = new MemoryStream();
-
                 var document = new Document(PageSize.A4.Rotate(), 15f, 15f, 20f, 20f);
                 var writer = PdfWriter.GetInstance(document, stream);
                 writer.CloseStream = false;
@@ -324,7 +794,7 @@ namespace TaskManagement.Controllers
                 var titleFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 14, BaseColor.DARK_GRAY);
                 var subtitleFont = FontFactory.GetFont(FontFactory.HELVETICA, 9, BaseColor.GRAY);
 
-                document.Add(new Paragraph("Audit Log Report", titleFont)
+                document.Add(new Paragraph("Action Log Report", titleFont)
                 {
                     Alignment = Element.ALIGN_CENTER,
                     SpacingAfter = 4f
@@ -340,9 +810,9 @@ namespace TaskManagement.Controllers
                     SpacingAfter = 12f
                 });
 
-                var table = new PdfPTable(10) { WidthPercentage = 100 };
-                table.SetWidths(new float[] { 3f, 5f, 10f, 9f, 5f, 7f, 9f, 9f, 14f, 9f });
-                //                            ID  ProjId  ProjName  Role  AccId  Action  OldVal  NewVal  Note  CreatedAt
+                var table = new PdfPTable(12) { WidthPercentage = 100 };
+                table.SetWidths(new float[] { 3f, 5f, 9f, 8f, 5f, 8f, 11f, 7f, 8f, 8f, 12f, 9f });
+                //                            ID  ProjId ProjName Role  AccId AccName AccEmail Action OldVal NewVal Note CreatedAt
 
                 var headerBg = new BaseColor(79, 129, 189);
                 var headerFont = FontFactory.GetFont(FontFactory.HELVETICA_BOLD, 7, BaseColor.WHITE);
@@ -352,7 +822,8 @@ namespace TaskManagement.Controllers
                 foreach (var h in new[]
                 {
             "ID", "Project ID", "Project Name", "Project Role",
-            "Account ID", "Action", "Old Value", "New Value", "Note", "Created At"
+            "Account ID", "Account Name", "Account Email",
+            "Action", "Old Value", "New Value", "Note", "Created At"
         })
                 {
                     table.AddCell(new PdfPCell(new Phrase(h, headerFont))
@@ -364,7 +835,6 @@ namespace TaskManagement.Controllers
                     });
                 }
 
-                // ── Data rows ─────────────────────────────────────────────────────
                 for (int i = 0; i < logs.Count; i++)
                 {
                     var log = logs[i];
@@ -374,13 +844,15 @@ namespace TaskManagement.Controllers
                     {
                 log.Id.ToString(),
                 log.ProjectId?.ToString() ?? "-",
-                log.ProjectName         ?? "-",
-                log.ProjectRole         ?? "-",
+                log.ProjectName           ?? "-",
+                log.ProjectRole           ?? "-",
                 log.AccountId.ToString(),
+                log.AccountName           ?? "-",
+                log.AccountEmail          ?? "-",
                 log.Action,
-                log.OldValue            ?? "-",
-                log.NewValue            ?? "-",
-                log.Note                ?? "-",
+                log.OldValue              ?? "-",
+                log.NewValue              ?? "-",
+                log.Note                  ?? "-",
                 log.CreatedAt.ToString("yyyy-MM-dd HH:mm")
             })
                     {
@@ -398,12 +870,14 @@ namespace TaskManagement.Controllers
                 stream.Seek(0, SeekOrigin.Begin);
 
                 var fileName = from.HasValue || to.HasValue
-                    ? $"AuditLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.pdf"
-                    : $"AuditLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+                    ? $"ActionLogs_{from?.ToString("yyyyMMdd") ?? "Start"}_{to?.ToString("yyyyMMdd") ?? "End"}.pdf"
+                    : $"ActionLogs_All_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
 
                 return File(stream.ToArray(), "application/pdf", fileName);
             }
             catch (Exception ex) { return StatusCode(500, new { error = ex.Message }); }
         }
+
+
     }
 }

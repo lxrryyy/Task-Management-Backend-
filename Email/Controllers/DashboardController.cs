@@ -10,12 +10,81 @@ namespace TaskManagement.Controllers
     public class DashboardController : ControllerBase     
     {
         private readonly AccountDbContext _context;
-
+        private static DateTime PhTime =>
+            TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public DashboardController(AccountDbContext context)
         {
             _context = context;
         }
 
+        [HttpGet("GetDashboardAdminStats")]
+        public async Task<IActionResult> GetDashboardAdminStats()
+        {
+            try
+            {
+                var totalUsers = await _context.Accounts
+                    .Where(a => a.isActive)
+                    .CountAsync();
+
+                var totalProjects = await _context.Projects
+                    .Where(p => !p.IsDeleted)
+                    .CountAsync();
+
+                var overdueTasks = await _context.Tasks
+                    .Where(t => !t.IsDeleted && t.DueDate < PhTime && t.StatusId != 4)
+                    .CountAsync();
+
+                var deactivatedUsers = await _context.Accounts
+                    .Where(a => !a.isActive)
+                    .CountAsync();
+                return Ok(new
+                {
+                    totalUsers,
+                    totalProjects,
+                    overdueTasks,
+                    deactivatedUsers
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpGet("GetDashboardUserStats")]
+        public async Task<IActionResult> GetDashboardUserStats()
+        {
+            try
+            {
+                var totalUsers = await _context.Accounts
+                    .Where(a => a.isActive)
+                    .CountAsync();
+
+                var totalProjects = await _context.Projects
+                    .Where(p => !p.IsDeleted)
+                    .CountAsync();
+
+                var overdueTasks = await _context.Tasks
+                    .Where(t => !t.IsDeleted && t.DueDate < PhTime && t.StatusId != 4)
+                    .CountAsync();
+
+                var completedTasks = await _context.Tasks
+                    .Where(t => !t.IsDeleted && t.StatusId == 4)
+                    .CountAsync();
+
+                return Ok(new
+                {
+                    totalUsers,
+                    totalProjects,
+                    overdueTasks,
+                    completedTasks
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
         [HttpGet("MyProjectsAndTasks")]   // return all projects and tasks with subtasks
         public async Task<IActionResult> GetMyProjectsAndTasks([FromQuery] int requesterId)
         {

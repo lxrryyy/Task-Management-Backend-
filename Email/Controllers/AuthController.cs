@@ -48,6 +48,9 @@ namespace TaskManagement.Controllers
                 if (account == null)
                     return Unauthorized("Invalid credentials");
 
+                if (!account.isActive)
+                    return Unauthorized("Your account has been deactivated. Please contact an administrator.");
+
                 var hasher = new PasswordHasher<Account>();
                 var verification = hasher.VerifyHashedPassword(account, account.PasswordHash, request.Password);
 
@@ -68,7 +71,7 @@ namespace TaskManagement.Controllers
                 {
                     AccountId = account.Id,
                     Action = "Logged in",
-                    Note = $"Account {account.Name} is logged in at {account.UpdatedAt}.",
+                    Note = $"Account {account.Name} is logged in.",
                     CreatedAt = PhTime
                 });
 
@@ -113,12 +116,13 @@ namespace TaskManagement.Controllers
                 account.ApiToken = null;
                 account.TokenExpiresAt = null;
                 account.UpdatedAt = logoutTime;
+                
 
                 _context.AuditLogs.Add(new AuditLog
                 {
                     AccountId = account.Id,
                     Action = "Logged out",
-                    Note = $"Account '{account.Name}' (ID: {account.Id}) logged out at {logoutTime}.",
+                    Note = $"Account '{account.Name}' logged out.",
                     CreatedAt = logoutTime
                 });
 

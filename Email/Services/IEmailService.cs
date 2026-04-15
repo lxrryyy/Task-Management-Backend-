@@ -10,6 +10,6 @@
         Task SendOtpAsync(string toEmail, string name, string otp);
         Task SendTaskDueWarningAsync(string to, string recipientName, string taskTitle, string projectName, DateTime dueDate, int hoursLeft);
         Task SendCommentNotificationAsync(string toEmail, string recipientName, string commenterName, string taskTitle, string commentContent);
-
+        Task SendAccountCreatedAsync(string email, string name, string password);
     }
 }

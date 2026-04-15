@@ -1028,7 +1028,7 @@ namespace TaskManagement.Controllers
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "RESTORE",
+                    Action = "RESTORED",
                     NewValue = project.Name,
                     Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})",
                     CreatedAt = PhTime

@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using TaskManagement.Data;
 using TaskManagement.DTOs.Account;
 using TaskManagement.Models;
+using TaskManagement.Services;
 
 namespace TaskManagement.Controllers
 {
@@ -21,12 +22,14 @@ namespace TaskManagement.Controllers
         private readonly AccountDbContext _context;
         private readonly PasswordHasher<Account> _passwordHasher = new PasswordHasher<Account>();
         private readonly IConfiguration _config;
-		private static DateTime PhTime =>
+        private readonly IEmailService _emailService;
+        private static DateTime PhTime =>
         	TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
-		public AccountController(AccountDbContext context, IConfiguration config)
+		public AccountController(AccountDbContext context, IConfiguration config, IEmailService emailService)
         {
             _context = context;
             _config = config;
+            _emailService = emailService;
         }
 
         [HttpGet]
@@ -62,13 +65,14 @@ namespace TaskManagement.Controllers
             try
             {
                 var users = await _context.Accounts
-                    .Where(a => a.Role == "User" && a.isActive)
+                    .Where(a => a.Role == "User")
                     .Select(a => new
                     {
                         a.Id,
                         a.Name,
                         a.Email,
                         a.Role,
+                        a.isActive,
                         a.Specialization,
                         a.CreatedAt,
                         ProjectCount = _context.ProjectMembers
@@ -92,6 +96,38 @@ namespace TaskManagement.Controllers
                 return StatusCode(500, new { error = ex.Message });
             }
         }
+
+
+        [HttpGet]
+        public IActionResult GeneratePassword()
+        {
+            const string upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const string lower = "abcdefghijklmnopqrstuvwxyz";
+            const string digits = "0123456789";
+            const string special = "!@#$%^&*()_+-=[]{}|;':\",./<>?";
+            const string all = upper + lower + digits + special;
+
+            var random = new Random();
+
+            // Guarantee at least one of each required character type
+            var password = new List<char>
+            {
+                upper[random.Next(upper.Length)],
+                lower[random.Next(lower.Length)],
+                digits[random.Next(digits.Length)],
+                special[random.Next(special.Length)]
+            };
+
+            // Fill the rest up to 12 characters
+            for (int i = password.Count; i < 12; i++)
+                password.Add(all[random.Next(all.Length)]);
+
+            // Shuffle so the guaranteed characters aren't always at the start
+            var shuffled = password.OrderBy(_ => random.Next()).ToArray();
+
+            return Ok(new { password = new string(shuffled) });
+        }
+
         [HttpGet]
         public async Task<ActionResult<Account>> GetAllUserRoleAccount()
         {
@@ -199,6 +235,9 @@ namespace TaskManagement.Controllers
             });
             await _context.SaveChangesAsync();
 
+            ///sending ng email
+            await _emailService.SendAccountCreatedAsync(newAccount.Email, newAccount.Name, dto.Password);
+
             return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, new
             {
                 newAccount.Id,
@@ -304,7 +343,7 @@ namespace TaskManagement.Controllers
             _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = id,
-                Action = "Updated",
+                Action = "UPDATED",
                 NewValue = string.Join(", ", changes),
                 Note = note,
                 CreatedAt = PhTime
@@ -336,10 +375,15 @@ namespace TaskManagement.Controllers
         public async Task<IActionResult> RemoveProfilePicture(int id)
         {
             var account = await _context.Accounts.FindAsync(id);
-            var existingAccount = _context.Accounts.Find(account);
-            if (existingAccount == null)
-                return NotFound();
-            existingAccount.ProfilePicture = null;
+            if (account == null)
+                return NotFound("Account not found.");
+
+            if (string.IsNullOrEmpty(account.ProfilePicture))
+                return BadRequest("No profile picture to remove.");
+
+            account.ProfilePicture = null;
+            account.UpdatedAt = PhTime;
+
             _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = account.Id,
@@ -347,8 +391,9 @@ namespace TaskManagement.Controllers
                 Note = $"Profile picture removed by {account.Name}, {account.Role}.",
                 CreatedAt = PhTime
             });
+
             await _context.SaveChangesAsync();
-            return Ok("Profile picture has been removed");
+            return Ok("Profile picture has been removed.");
         }
 
 
