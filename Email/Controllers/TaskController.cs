@@ -29,47 +29,73 @@ namespace TaskManagement.Controllers
         private async Task<List<object>> CheckWorkloadWarnings(int taskId, List<int> assigneeIds)
         {
             var warnings = new List<object>();
-
-            var task = await _context.Tasks.FindAsync(taskId);
-            if (task == null || !task.StoryPoints.HasValue)
+            var assigneeIdSet = assigneeIds
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
+            if (assigneeIdSet.Count == 0)
                 return warnings;
 
-            foreach (var accountId in assigneeIds)
+            var task = await _context.Tasks
+                .AsNoTracking()
+                .Where(t => t.Id == taskId)
+                .Select(t => new { t.Id, t.StartDate, t.DueDate, t.StoryPoints })
+                .FirstOrDefaultAsync();
+            if (task == null || !task.StoryPoints.HasValue)
+                return warnings;
+            if (!task.StartDate.HasValue || !task.DueDate.HasValue)
+                return warnings;
+
+            var accountNames = await _context.Accounts
+                .AsNoTracking()
+                .Where(a => assigneeIdSet.Contains(a.Id))
+                .Select(a => new { a.Id, a.Name })
+                .ToDictionaryAsync(a => a.Id, a => a.Name);
+
+            var overlappingStoryPoints = await _context.TaskAssignments
+                .AsNoTracking()
+                .Where(a =>
+                    assigneeIdSet.Contains(a.AccountId) &&
+                    !a.IsDeleted &&
+                    !a.Task.IsDeleted &&
+                    a.TaskId != taskId &&
+                    a.Task.StoryPoints != null &&
+                    a.Task.StartDate.HasValue &&
+                    a.Task.DueDate.HasValue &&
+                    a.Task.StartDate.Value.Date <= task.DueDate.Value.Date &&
+                    a.Task.DueDate.Value.Date >= task.StartDate.Value.Date)
+                .Select(a => new { a.AccountId, StoryPoints = a.Task.StoryPoints!.Value })
+                .ToListAsync();
+
+            var existingHoursByAccount = overlappingStoryPoints
+                .GroupBy(x => x.AccountId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Sum(x => BusinessDayHelper.GetHoursForStoryPoints(x.StoryPoints))
+                );
+
+            var newTaskHours = BusinessDayHelper.GetHoursForStoryPoints(task.StoryPoints.Value);
+            foreach (var accountId in assigneeIdSet)
             {
-                var assigneeAccount = await _context.Accounts.FindAsync(accountId);
-
-                var existingTaskHours = await _context.TaskAssignments
-                    .Where(a =>
-                        a.AccountId == accountId &&
-                        !a.IsDeleted &&
-                        !a.Task.IsDeleted &&
-                        a.TaskId != taskId &&
-                        a.Task.StoryPoints != null &&
-                        a.Task.StartDate.Value.Date <= task.DueDate.Value.Date &&
-                        a.Task.DueDate.Value.Date >= task.StartDate.Value.Date)
-                    .Select(a => a.Task.StoryPoints!.Value)
-                    .ToListAsync();
-
-                var existingHours = existingTaskHours.Sum(sp => BusinessDayHelper.GetHoursForStoryPoints(sp));
-                var newTaskHours = BusinessDayHelper.GetHoursForStoryPoints(task.StoryPoints.Value);
+                var existingHours = existingHoursByAccount.TryGetValue(accountId, out var val) ? val : 0;
                 var totalHours = existingHours + newTaskHours;
+                if (totalHours <= 8)
+                    continue;
 
-                if (totalHours > 8)
+                var accountName = accountNames.TryGetValue(accountId, out var n) ? n : null;
+                warnings.Add(new
                 {
-                    warnings.Add(new
-                    {
-                        accountId = accountId,
-                        accountName = assigneeAccount?.Name,
-                        totalHours = totalHours,
-                        newTaskHours = newTaskHours,
-                        existingHours = existingHours,
-                        capacity = 8,
-                        overloadBy = totalHours - 8,
-                        message = $"{assigneeAccount?.Name} is overloaded by {totalHours - 8}h " +
-                                        $"({totalHours}h total / 8h daily capacity) " +
-                                        $"during {task.StartDate:yyyy-MM-dd} to {task.DueDate:yyyy-MM-dd}."
-                    });
-                }
+                    accountId,
+                    accountName,
+                    totalHours,
+                    newTaskHours,
+                    existingHours,
+                    capacity = 8,
+                    overloadBy = totalHours - 8,
+                    message = $"{accountName} is overloaded by {totalHours - 8}h " +
+                              $"({totalHours}h total / 8h daily capacity) " +
+                              $"during {task.StartDate:yyyy-MM-dd} to {task.DueDate:yyyy-MM-dd}."
+                });
             }
 
             return warnings;
@@ -223,42 +249,69 @@ namespace TaskManagement.Controllers
 
             var warnings = new List<object>();
 
-            foreach (var accountId in assigneeIds)
-            {
-                var account = await _context.Accounts.FindAsync(accountId);
-
-                var overlappingHours = await _context.TaskAssignments
-                    .Where(a =>
-                        a.AccountId == accountId &&
-                        !a.IsDeleted &&
-                        !a.Task.IsDeleted &&
-                        a.Task.StoryPoints != null &&
-                        a.Task.StartDate.Value.Date <= projectedDueDate.Date &&
-                        a.Task.DueDate.Value.Date >= startDate.Date)
-                    .Select(a => a.Task.StoryPoints!.Value)
-                    .ToListAsync();
-
-                var existingHours = overlappingHours.Sum(sp => BusinessDayHelper.GetHoursForStoryPoints(sp));
-                var totalHours = existingHours + newTaskHours;
-
-                if (totalHours > 8)
+            var assigneeIdSet = assigneeIds
+                .Where(id => id > 0)
+                .Distinct()
+                .ToList();
+            if (assigneeIdSet.Count == 0)
+                return Ok(new
                 {
-                    warnings.Add(new
-                    {
-                        accountId,
-                        accountName = account?.Name,
-                        existingHours,
-                        newTaskHours,
-                        totalHours,
-                        capacity = 8,
-                        overloadBy = totalHours - 8,
-                        projectedStartDate = startDate.ToString("yyyy-MM-dd HH:mm"),
-                        projectedDueDate = projectedDueDate.ToString("yyyy-MM-dd HH:mm"),
-                        message = $"{account?.Name} is overloaded by {totalHours - 8}h " +
-                                  $"({totalHours}h total / 8h daily capacity) " +
-                                  $"during {startDate:yyyy-MM-dd} to {projectedDueDate:yyyy-MM-dd}."
-                    });
-                }
+                    projectedStartDate = startDate.ToString("yyyy-MM-dd HH:mm"),
+                    projectedDueDate = projectedDueDate.ToString("yyyy-MM-dd HH:mm"),
+                    storyPoints,
+                    warnings
+                });
+
+            var accountNames = await _context.Accounts
+                .AsNoTracking()
+                .Where(a => assigneeIdSet.Contains(a.Id))
+                .Select(a => new { a.Id, a.Name })
+                .ToDictionaryAsync(a => a.Id, a => a.Name);
+
+            var overlappingRows = await _context.TaskAssignments
+                .AsNoTracking()
+                .Where(a =>
+                    assigneeIdSet.Contains(a.AccountId) &&
+                    !a.IsDeleted &&
+                    !a.Task.IsDeleted &&
+                    a.Task.StoryPoints != null &&
+                    a.Task.StartDate.HasValue &&
+                    a.Task.DueDate.HasValue &&
+                    a.Task.StartDate.Value.Date <= projectedDueDate.Date &&
+                    a.Task.DueDate.Value.Date >= startDate.Date)
+                .Select(a => new { a.AccountId, StoryPoints = a.Task.StoryPoints!.Value })
+                .ToListAsync();
+
+            var existingHoursByAccount = overlappingRows
+                .GroupBy(x => x.AccountId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Sum(x => BusinessDayHelper.GetHoursForStoryPoints(x.StoryPoints))
+                );
+
+            foreach (var accountId in assigneeIdSet)
+            {
+                var existingHours = existingHoursByAccount.TryGetValue(accountId, out var val) ? val : 0;
+                var totalHours = existingHours + newTaskHours;
+                if (totalHours <= 8)
+                    continue;
+
+                var accountName = accountNames.TryGetValue(accountId, out var n) ? n : null;
+                warnings.Add(new
+                {
+                    accountId,
+                    accountName,
+                    existingHours,
+                    newTaskHours,
+                    totalHours,
+                    capacity = 8,
+                    overloadBy = totalHours - 8,
+                    projectedStartDate = startDate.ToString("yyyy-MM-dd HH:mm"),
+                    projectedDueDate = projectedDueDate.ToString("yyyy-MM-dd HH:mm"),
+                    message = $"{accountName} is overloaded by {totalHours - 8}h " +
+                              $"({totalHours}h total / 8h daily capacity) " +
+                              $"during {startDate:yyyy-MM-dd} to {projectedDueDate:yyyy-MM-dd}."
+                });
             }
 
             return Ok(new
@@ -871,6 +924,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var tasks = await _context.Tasks
+                    .AsNoTracking()
                     .Where(t => !t.IsDeleted && t.Assignments.Any(a => a.AccountId == accountId && !a.IsDeleted))
                     .Select(t => new TaskResponseDTO
                     {
@@ -907,16 +961,20 @@ namespace TaskManagement.Controllers
         {
             try
             {
-                var requester = await _context.Accounts.FindAsync(requesterId);
+                var requester = await _context.Accounts
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Id == requesterId);
                 if (requester == null)
                     return NotFound("Account not found.");
 
                 IQueryable<TaskItem> query = _context.Tasks
+                    .AsNoTracking()
                     .Where(t => t.ProjectId == projectId && !t.IsDeleted);
 
                 if (requester.Role != "Admin")
                 {
                     var projectMember = await _context.ProjectMembers
+                        .AsNoTracking()
                         .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId);
 
                     if (projectMember == null)

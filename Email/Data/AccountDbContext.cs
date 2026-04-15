@@ -42,6 +42,29 @@ namespace TaskManagement.Data
             admin.PasswordHash = hasher.HashPassword(admin, "Admin@123");
             modelBuilder.Entity<Account>().HasData(admin);
             // Task relationships
+            modelBuilder.Entity<TaskItem>()
+                .HasIndex(t => new { t.ProjectId, t.ParentTaskId, t.IsDeleted });
+            modelBuilder.Entity<TaskItem>()
+                .HasIndex(t => new { t.ProjectId, t.StatusId, t.IsDeleted });
+            modelBuilder.Entity<TaskItem>()
+                .HasIndex(t => new { t.ProjectId, t.DueDate, t.IsDeleted });
+            modelBuilder.Entity<TaskItem>()
+                .HasIndex(t => new { t.ParentTaskId, t.IsDeleted });
+
+            modelBuilder.Entity<TaskAssignment>()
+                .HasIndex(a => new { a.TaskId, a.AccountId, a.IsDeleted });
+            modelBuilder.Entity<TaskAssignment>()
+                .HasIndex(a => new { a.AccountId, a.IsDeleted });
+
+            modelBuilder.Entity<TaskComment>()
+                .HasIndex(c => new { c.TaskId, c.IsDeleted, c.CreatedAt });
+
+            modelBuilder.Entity<ProjectMember>()
+                .HasIndex(m => new { m.ProjectId, m.AccountId, m.IsDeleted });
+
+            modelBuilder.Entity<Project>()
+                .HasIndex(p => new { p.IsDeleted, p.CreatedAt });
+
             modelBuilder.Entity<TaskAssignment>()
                 .HasOne<TaskItem>(a => a.Task)
                 .WithMany(t => t.Assignments)

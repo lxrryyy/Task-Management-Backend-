@@ -29,15 +29,45 @@ namespace TaskManagement.Controllers
 
         private async Task<int> GetProjectCompletionPercentage(int projectId)
         {
-            var rootTasks = await _context.Tasks
+            var counts = await _context.Tasks
+                .AsNoTracking()
                 .Where(t => t.ProjectId == projectId && !t.IsDeleted && t.ParentTaskId == null)
-                .Select(t => new { t.StatusId })
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Completed = g.Count(x => x.StatusId == 4)
+                })
+                .FirstOrDefaultAsync();
+
+            if (counts == null || counts.Total == 0) return 0;
+            return (int)Math.Round((double)counts.Completed / counts.Total * 100);
+        }
+
+        private async Task<Dictionary<int, int>> GetProjectCompletionPercentageMap(IEnumerable<int> projectIds)
+        {
+            var ids = projectIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0)
+            {
+                return new Dictionary<int, int>();
+            }
+
+            var rows = await _context.Tasks
+                .AsNoTracking()
+                .Where(t => ids.Contains(t.ProjectId) && !t.IsDeleted && t.ParentTaskId == null)
+                .GroupBy(t => t.ProjectId)
+                .Select(g => new
+                {
+                    ProjectId = g.Key,
+                    Total = g.Count(),
+                    Completed = g.Count(x => x.StatusId == 4)
+                })
                 .ToListAsync();
 
-            if (!rootTasks.Any()) return 0;
-
-            var completed = rootTasks.Count(t => t.StatusId == 4); // 4 = Completed
-            return (int)Math.Round((double)completed / rootTasks.Count * 100);
+            return rows.ToDictionary(
+                x => x.ProjectId,
+                x => x.Total == 0 ? 0 : (int)Math.Round((double)x.Completed / x.Total * 100)
+            );
         }
         [HttpGet("GetAllProjectsStatus")]
         public async Task<IActionResult> GetAllProjectStatuses()
@@ -74,6 +104,7 @@ namespace TaskManagement.Controllers
                     return NotFound("Account not found.");
 
                 var projects = await _context.Projects
+                    .AsNoTracking()
                     .Where(p => p.CreatedById == accountId && !p.IsDeleted)
                     .Select(p => new ProjectResponseDTO
                     {
@@ -108,8 +139,9 @@ namespace TaskManagement.Controllers
                 if (!projects.Any())
                     return NotFound("No projects found created by this account.");
 
+                var completionMap = await GetProjectCompletionPercentageMap(projects.Select(p => p.Id));
                 foreach (var p in projects)
-                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
+                    p.CompletionPercentage = completionMap.TryGetValue(p.Id, out var cp) ? cp : 0;
 
                 return Ok(projects);
             }
@@ -697,6 +729,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var projects = await _context.Projects
+                    .AsNoTracking()
                     .Where(p => !p.IsDeleted)
                     .Select(p => new ProjectResponseDTO
                     {
@@ -728,8 +761,9 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
+                var completionMap = await GetProjectCompletionPercentageMap(projects.Select(p => p.Id));
                 foreach (var p in projects)
-                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
+                    p.CompletionPercentage = completionMap.TryGetValue(p.Id, out var cp) ? cp : 0;
 
                 return Ok(projects);
             }
@@ -795,6 +829,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var projects = await _context.Projects
+                    .AsNoTracking()
                     .Where(p => !p.IsDeleted && p.Members.Any(m => m.AccountId == accountId))
                     .Select(p => new ProjectResponseDTO
                     {
@@ -826,8 +861,9 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
+                var completionMap = await GetProjectCompletionPercentageMap(projects.Select(p => p.Id));
                 foreach (var p in projects)
-                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
+                    p.CompletionPercentage = completionMap.TryGetValue(p.Id, out var cp) ? cp : 0;
 
                 return Ok(projects);
             }

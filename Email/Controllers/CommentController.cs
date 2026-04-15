@@ -26,26 +26,29 @@ namespace TaskManagement.Controllers
         {
             try
             {
-                var task = await _context.Tasks.FindAsync(taskId);
-                if (task == null || task.IsDeleted)
+                var taskExists = await _context.Tasks
+                    .AsNoTracking()
+                    .AnyAsync(t => t.Id == taskId && !t.IsDeleted);
+                if (!taskExists)
                     return NotFound("Task not found.");
 
-                var comments = await _context.TaskComments
-                    .Where(c => c.TaskId == taskId && !c.IsDeleted)
-                    .Select(c => new
+                var comments = await (
+                    from c in _context.TaskComments.AsNoTracking()
+                    join a in _context.Accounts.AsNoTracking() on c.AccountId equals a.Id into accountJoin
+                    from a in accountJoin.DefaultIfEmpty()
+                    where c.TaskId == taskId && !c.IsDeleted
+                    orderby c.CreatedAt descending
+                    select new
                     {
                         c.Id,
                         c.TaskId,
                         c.AccountId,
-                        AccountName = _context.Accounts
-                            .Where(a => a.Id == c.AccountId)
-                            .Select(a => a.Name)
-                            .FirstOrDefault(),
+                        AccountName = a != null ? a.Name : "User",
                         c.Content,
                         c.CreatedAt,
                         c.UpdatedAt
-                    })
-                    .ToListAsync();
+                    }
+                ).ToListAsync();
 
                 return Ok(comments);
             }
