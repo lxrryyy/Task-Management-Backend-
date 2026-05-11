@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TaskManagement.Data;
 
@@ -11,9 +12,11 @@ using TaskManagement.Data;
 namespace TaskManagement.Migrations
 {
     [DbContext(typeof(AccountDbContext))]
-    partial class AccountDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260317083953_RenameTimeLogsToAuditLogs")]
+    partial class RenameTimeLogsToAuditLogs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -56,10 +59,6 @@ namespace TaskManagement.Migrations
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Specialization")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
@@ -83,9 +82,8 @@ namespace TaskManagement.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             Email = "admin@admin.com",
                             Name = "Admin",
-                            PasswordHash = "AQAAAAIAAYagAAAAEDxMHg41N3VvF94PAuwamUoaymWWiPgdWmeYpoqrEBbOhE8FZxdLR3ffI9KupCo3Vw==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEJNBxA1RPTuBgUU7zAJNvdz47IVSzkTaFcri8zzlQkP+zCECRyTrkxvyL5Kw++03GQ==",
                             Role = "Admin",
-                            Specialization = "",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             isActive = true
                         });
@@ -125,8 +123,6 @@ namespace TaskManagement.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("ProjectId");
 
                     b.HasIndex("TaskId");
 
@@ -468,9 +464,6 @@ namespace TaskManagement.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsWarningEmailSent")
-                        .HasColumnType("bit");
-
                     b.Property<int?>("ParentTaskId")
                         .HasColumnType("int");
 
@@ -567,6 +560,43 @@ namespace TaskManagement.Migrations
                         });
                 });
 
+            modelBuilder.Entity("TaskManagement.Models.TaskPermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("CanComment")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanDelete")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanEdit")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanView")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TaskPermissions");
+                });
+
             modelBuilder.Entity("TaskManagement.Models.TaskPriority", b =>
                 {
                     b.Property<int>("Id")
@@ -625,16 +655,10 @@ namespace TaskManagement.Migrations
 
             modelBuilder.Entity("TaskManagement.Models.AuditLog", b =>
                 {
-                    b.HasOne("TaskManagement.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId");
-
                     b.HasOne("TaskManagement.Models.TaskItem", null)
                         .WithMany("AuditLogs")
                         .HasForeignKey("TaskId")
                         .OnDelete(DeleteBehavior.Cascade);
-
-                    b.Navigation("Project");
                 });
 
             modelBuilder.Entity("TaskManagement.Models.Notification", b =>

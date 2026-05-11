@@ -15,22 +15,59 @@ namespace TaskManagement.Controllers
     public class ProjectController : ControllerBase
     {
         private readonly AccountDbContext _context;
-        public ProjectController(AccountDbContext context)
+        private readonly NotificationService _notificationService;
+        private readonly IEmailService _emailService;
+
+        private static DateTime PhTime =>
+             TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+        public ProjectController(AccountDbContext context, NotificationService notificationService, IEmailService emailService)
         {
             _context = context;
+            _notificationService = notificationService;
+            _emailService = emailService;
         }
 
         private async Task<int> GetProjectCompletionPercentage(int projectId)
         {
-            var rootTasks = await _context.Tasks
+            var counts = await _context.Tasks
+                .AsNoTracking()
                 .Where(t => t.ProjectId == projectId && !t.IsDeleted && t.ParentTaskId == null)
-                .Select(t => new { t.StatusId })
+                .GroupBy(_ => 1)
+                .Select(g => new
+                {
+                    Total = g.Count(),
+                    Completed = g.Count(x => x.StatusId == 4)
+                })
+                .FirstOrDefaultAsync();
+
+            if (counts == null || counts.Total == 0) return 0;
+            return (int)Math.Round((double)counts.Completed / counts.Total * 100);
+        }
+
+        private async Task<Dictionary<int, int>> GetProjectCompletionPercentageMap(IEnumerable<int> projectIds)
+        {
+            var ids = projectIds.Where(id => id > 0).Distinct().ToList();
+            if (ids.Count == 0)
+            {
+                return new Dictionary<int, int>();
+            }
+
+            var rows = await _context.Tasks
+                .AsNoTracking()
+                .Where(t => ids.Contains(t.ProjectId) && !t.IsDeleted && t.ParentTaskId == null)
+                .GroupBy(t => t.ProjectId)
+                .Select(g => new
+                {
+                    ProjectId = g.Key,
+                    Total = g.Count(),
+                    Completed = g.Count(x => x.StatusId == 4)
+                })
                 .ToListAsync();
 
-            if (!rootTasks.Any()) return 0;
-
-            var completed = rootTasks.Count(t => t.StatusId == 4); // 4 = Completed
-            return (int)Math.Round((double)completed / rootTasks.Count * 100);
+            return rows.ToDictionary(
+                x => x.ProjectId,
+                x => x.Total == 0 ? 0 : (int)Math.Round((double)x.Completed / x.Total * 100)
+            );
         }
         [HttpGet("GetAllProjectsStatus")]
         public async Task<IActionResult> GetAllProjectStatuses()
@@ -67,6 +104,7 @@ namespace TaskManagement.Controllers
                     return NotFound("Account not found.");
 
                 var projects = await _context.Projects
+                    .AsNoTracking()
                     .Where(p => p.CreatedById == accountId && !p.IsDeleted)
                     .Select(p => new ProjectResponseDTO
                     {
@@ -101,8 +139,9 @@ namespace TaskManagement.Controllers
                 if (!projects.Any())
                     return NotFound("No projects found created by this account.");
 
+                var completionMap = await GetProjectCompletionPercentageMap(projects.Select(p => p.Id));
                 foreach (var p in projects)
-                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
+                    p.CompletionPercentage = completionMap.TryGetValue(p.Id, out var cp) ? cp : 0;
 
                 return Ok(projects);
             }
@@ -143,13 +182,21 @@ namespace TaskManagement.Controllers
                         return BadRequest($"Account with ID {dto.ProjectManagerId} does not exist.");
 
                     projectManagerId = dto.ProjectManagerId.Value;
-                    scrumMasterId = dto.ScrumMasterId;
-
-                    if (dto.ScrumMasterId.HasValue)
+                    if (dto.IsAlsoScrumMaster)
+                    {
+                        scrumMasterId = projectManagerId;  // PM is also SM
+                    }
+                    else if (dto.ScrumMasterId.HasValue)
                     {
                         var smExists = await _context.Accounts.AnyAsync(a => a.Id == dto.ScrumMasterId.Value);
                         if (!smExists)
                             return BadRequest($"Account with ID {dto.ScrumMasterId} does not exist.");
+
+                        scrumMasterId = dto.ScrumMasterId.Value;
+                    }
+                    else
+                    {
+                        scrumMasterId = null;  // no SM assigned
                     }
                 }
                 else
@@ -159,7 +206,6 @@ namespace TaskManagement.Controllers
 
                     if (!dto.IsAlsoScrumMaster && dto.ScrumMasterId != null && dto.ScrumMasterId != creatorId)
                     {
-                        // 
                         var smExists = await _context.Accounts.AnyAsync(a => a.Id == dto.ScrumMasterId.Value);
                         if (!smExists)
                             return BadRequest($"Account with ID {dto.ScrumMasterId} does not exist.");
@@ -189,23 +235,117 @@ namespace TaskManagement.Controllers
                     StatusId = 1, // Not Started, then Active when PM/SM adds first task
                     StartDate = dto.StartDate,
                     EndDate = dto.EndDate,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime,
+                    UpdatedAt = PhTime
                 };
 
                 _context.Projects.Add(project);
                 await _context.SaveChangesAsync();
 
+                //NOTIFFF
+                if (scrumMasterId == projectManagerId || !scrumMasterId.HasValue)
+                {
+                    await _notificationService.NotifyAsync(
+                        projectManagerId,
+                        $"You have been assigned as Project Manager - Scrum Master of '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+                }
+                else
+                {
+                    await _notificationService.NotifyAsync(
+                        projectManagerId,
+                        $"You have been assigned as Project Manager of '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+
+                    await _notificationService.NotifyAsync(
+                        scrumMasterId.Value,
+                        $"You have been assigned as Scrum Master of '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+                }
+
+                foreach (var memberId in dto.MemberIds.Distinct())
+                {
+                    if (memberId == projectManagerId || memberId == scrumMasterId)
+                        continue;
+
+                    await _notificationService.NotifyAsync(
+                        memberId,
+                        $"You have been added as a Member to project '{dto.Name}'.",
+                        projectId: project.Id
+                    );
+                }
+
+                var pmAccount = await _context.Accounts.FindAsync(projectManagerId);
+                if (pmAccount?.Email != null)
+                {
+                    var pmRoleLabel = (scrumMasterId.HasValue && scrumMasterId == projectManagerId)
+                        ? "Project Manager & Scrum Master"
+                        : "Project Manager";
+
+                    await _emailService.SendEmailAsync(
+                        pmAccount.Email,
+                        $"You've been assigned to project: {dto.Name}",
+                        $@"<h2>Project Assignment</h2>
+                           <p>Hello <strong>{pmAccount.Name}</strong>,</p>
+                           <p>You have been assigned as <strong>{pmRoleLabel}</strong> of project <strong>{dto.Name}</strong>.</p>
+                           <p><strong>Start Date:</strong> {dto.StartDate:MMMM dd, yyyy}</p>
+                           <p><strong>End Date:</strong> {dto.EndDate:MMMM dd, yyyy}</p>
+                           <p>Please log in to view the project details.</p>"
+                    );
+                }
+
+                if (scrumMasterId.HasValue && scrumMasterId != projectManagerId)
+                {
+                    var smEmailAccount = await _context.Accounts.FindAsync(scrumMasterId.Value);
+                    if (smEmailAccount?.Email != null)
+                    {
+                        await _emailService.SendEmailAsync(
+                            smEmailAccount.Email,
+                            $"You've been assigned to project: {dto.Name}",
+                            $@"<h2>Project Assignment</h2>
+                           <p>Hello <strong>{smEmailAccount.Name}</strong>,</p>
+                           <p>You have been assigned as <strong>Scrum Master</strong> of project <strong>{dto.Name}</strong>.</p>
+                           <p><strong>Start Date:</strong> {dto.StartDate:MMMM dd, yyyy}</p>
+                           <p><strong>End Date:</strong> {dto.EndDate:MMMM dd, yyyy}</p>
+                           <p>Please log in to view the project details.</p>"
+                        );
+                    }
+                }
+
+                foreach (var memberId in dto.MemberIds.Distinct())
+                {
+                    if (memberId == projectManagerId || memberId == scrumMasterId)
+                        continue;
+
+                    var memberAccount = await _context.Accounts.FindAsync(memberId);
+                    if (memberAccount?.Email != null)
+                    {
+                        await _emailService.SendEmailAsync(
+                            memberAccount.Email,
+                            $"You've been added to project: {dto.Name}",
+                            $@"<h2>Project Member Assignment</h2>
+                               <p>Hello <strong>{memberAccount.Name}</strong>,</p>
+                               <p>You have been added as a <strong>Member</strong> of project <strong>{dto.Name}</strong>.</p>
+                               <p><strong>Start Date:</strong> {dto.StartDate:MMMM dd, yyyy}</p>
+                               <p><strong>End Date:</strong> {dto.EndDate:MMMM dd, yyyy}</p>
+                               <p>Please log in to view the project details.</p>"
+                        );
+                    }
+                }
+
                 var pmRole = (scrumMasterId != null && scrumMasterId == projectManagerId)
-                    ? "ProjectManager-ScrumMaster"
-                    : "ProjectManager";
+                    ? "Project Manager - Scrum Master"
+                    : "Project Manager";
 
                 _context.ProjectMembers.Add(new ProjectMember
                 {
                     ProjectId = project.Id,
                     AccountId = projectManagerId,
                     Role = pmRole,
-                    JoinedAt = DateTime.UtcNow
+                    JoinedAt = PhTime
                 });
 
                 if (scrumMasterId != null && scrumMasterId != projectManagerId)
@@ -214,8 +354,8 @@ namespace TaskManagement.Controllers
                     {
                         ProjectId = project.Id,
                         AccountId = scrumMasterId.Value,
-                        Role = "ScrumMaster",
-                        JoinedAt = DateTime.UtcNow
+                        Role = "Scrum Master",
+                        JoinedAt = PhTime
                     });
                 }
 
@@ -237,24 +377,24 @@ namespace TaskManagement.Controllers
                             ProjectId = project.Id,
                             AccountId = memberId,
                             Role = "Member",
-                            JoinedAt = DateTime.UtcNow
+                            JoinedAt = PhTime
                         });
                     }
                 }
 
-                await _context.SaveChangesAsync();
-                _context.TimeLogs.Add(new TimeLog
+                
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = creatorId,
-                    Action = "ProjectCreated",
+                    Action = "CREATED",
                     NewValue = project.Name,
-                    Note = $"Project created by {creator.Name}"
+                    Note = $"Created project '{project.Name}' by {creator.Name}.",
+                    CreatedAt = PhTime
                 });
+                await _context.SaveChangesAsync();
 
-
-                var pmAccount = await _context.Accounts.FindAsync(projectManagerId);
                 var smAccount = scrumMasterId.HasValue
                     ? await _context.Accounts.FindAsync(scrumMasterId.Value)
                     : null;
@@ -312,8 +452,8 @@ namespace TaskManagement.Controllers
                     .SingleOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId && !m.IsDeleted);
 
                 var isAdmin = requester.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                 if (!isAdmin && !isProjectManager)
                     return StatusCode(403, "Only the Project Manager or Admin can update this project.");
@@ -350,7 +490,7 @@ namespace TaskManagement.Controllers
                     if (oldPm != null)
                     {
                         oldPm.IsDeleted = true;
-                        oldPm.DeletedAt = DateTime.UtcNow;
+                        oldPm.DeletedAt = PhTime;
                     }
 
                     var newPm = await _context.ProjectMembers
@@ -362,19 +502,19 @@ namespace TaskManagement.Controllers
                         {
                             ProjectId = projectId,
                             AccountId = dto.ProjectManagerId.Value,
-                            Role = "ProjectManager",
-                            JoinedAt = DateTime.UtcNow
+                            Role = "Project Manager",
+                            JoinedAt = PhTime
                         });
                     }
                     else
                     {
                         newPm.IsDeleted = false;
                         newPm.DeletedAt = null;
-                        newPm.Role = newPm.Role == "ScrumMaster" ? "ProjectManager-ScrumMaster" : "ProjectManager";
+                        newPm.Role = newPm.Role == "Scrum Master" ? "Project Manager - Scrum Master" : "Project Manager";
                         _context.Entry(newPm).State = EntityState.Modified;
                     }
 
-                    changes.Add($"ProjectManager: {project.ProjectManagerId} → {dto.ProjectManagerId}");
+                    changes.Add($"Project Manager: {project.ProjectManagerId} → {dto.ProjectManagerId}");
                     project.ProjectManagerId = dto.ProjectManagerId.Value;
                 }
 
@@ -388,13 +528,13 @@ namespace TaskManagement.Controllers
 
                         if (oldSm != null)
                         {
-                            if (oldSm.Role == "ScrumMaster")
+                            if (oldSm.Role == "Scrum Master")
                             {
                                 oldSm.IsDeleted = true;
-                                oldSm.DeletedAt = DateTime.UtcNow;
+                                oldSm.DeletedAt = PhTime;
                             }
-                            else if (oldSm.Role == "ProjectManager-ScrumMaster")
-                                oldSm.Role = "ProjectManager";
+                            else if (oldSm.Role == "Project Manager - Scrum Master")
+                                oldSm.Role = "Project Manager";
 
                             _context.Entry(oldSm).State = EntityState.Modified;
                         }
@@ -411,7 +551,7 @@ namespace TaskManagement.Controllers
                         {
                             newSm.IsDeleted = false;
                             newSm.DeletedAt = null;
-                            newSm.Role = newSm.Role == "ProjectManager" ? "ProjectManager-ScrumMaster" : "ScrumMaster";
+                            newSm.Role = newSm.Role == "Project Manager" ? "Project Manager - Scrum Master" : "Scrum Master";
                             _context.Entry(newSm).State = EntityState.Modified;
                         }
                         else
@@ -420,13 +560,13 @@ namespace TaskManagement.Controllers
                             {
                                 ProjectId = projectId,
                                 AccountId = dto.ScrumMasterId.Value,
-                                Role = "ScrumMaster",
-                                JoinedAt = DateTime.UtcNow
+                                Role = "Scrum Master",
+                                JoinedAt = PhTime
                             });
                         }
                     }
 
-                    changes.Add($"ScrumMaster: {project.ScrumMasterId} → {dto.ScrumMasterId}");
+                    changes.Add($"Scrum Master: {project.ScrumMasterId} → {dto.ScrumMasterId}");
                     project.ScrumMasterId = dto.ScrumMasterId;
                 }
 
@@ -449,7 +589,7 @@ namespace TaskManagement.Controllers
                     foreach (var m in toRemove)
                     {
                         m.IsDeleted = true;
-                        m.DeletedAt = DateTime.UtcNow;
+                        m.DeletedAt = PhTime;
                     }
 
                     foreach (var memberId in dto.AssigneeIds.Distinct())
@@ -470,7 +610,7 @@ namespace TaskManagement.Controllers
                                 ProjectId = projectId,
                                 AccountId = memberId,
                                 Role = "Member",
-                                JoinedAt = DateTime.UtcNow
+                                JoinedAt = PhTime
                             });
                         }
                         else if (existingMember.IsDeleted)
@@ -499,23 +639,58 @@ namespace TaskManagement.Controllers
                     project.EndDate = dto.EndDate.Value;
                 }
 
-                project.UpdatedAt = DateTime.UtcNow;
+                project.UpdatedAt = PhTime;
 
                 var requesterRole = requester.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
 
                 if (changes.Any())
                 {
-                    _context.TimeLogs.Add(new TimeLog
+                    _context.AuditLogs.Add(new AuditLog
                     {
                         ProjectId = project.Id,
                         TaskId = null,
                         AccountId = requesterId,
-                        Action = "Project Updated",
+                        Action = "UPDATED",
                         NewValue = string.Join(", ", changes),
-                        Note = $"Project updated by {requester.Name} ({requesterRole})"
+                        Note = $"Project updated '{project.Name}'by {requester.Name} ({requesterRole}).",
+                        CreatedAt = PhTime
                     });
                 }
+                if (changes.Any())
+                {
+                    var pmAcc = await _context.Accounts.FindAsync(project.ProjectManagerId);
+                    if (pmAcc?.Email != null)
+                    {
+                        await _emailService.SendEmailAsync(
+                            pmAcc.Email,
+                            $"Project Updated: {project.Name}",
+                            $@"<h2>Project Update Notification</h2>
+                           <p>Hello <strong>{pmAcc.Name}</strong>,</p>
+                           <p>The project <strong>{project.Name}</strong> has been updated by <strong>{requester.Name}</strong>.</p>
+                           <p><strong>Changes:</strong></p>
+                           <ul>{string.Join("", changes.Select(c => $"<li>{c}</li>"))}</ul>
+                           <p>Please log in to review the changes.</p>"
+                        );
+                    }
 
+                    if (project.ScrumMasterId.HasValue && project.ScrumMasterId != project.ProjectManagerId)
+                    {
+                        var smAcc = await _context.Accounts.FindAsync(project.ScrumMasterId.Value);
+                        if (smAcc?.Email != null)
+                        {
+                            await _emailService.SendEmailAsync(
+                                smAcc.Email,
+                                $"Project Updated: {project.Name}",
+                                $@"<h2>Project Update Notification</h2>
+                               <p>Hello <strong>{smAcc.Name}</strong>,</p>
+                               <p>The project <strong>{project.Name}</strong> has been updated by <strong>{requester.Name}</strong>.</p>
+                               <p><strong>Changes:</strong></p>
+                               <ul>{string.Join("", changes.Select(c => $"<li>{c}</li>"))}</ul>
+                               <p>Please log in to review the changes.</p>"
+                            );
+                        }
+                    }
+                }
                 await _context.SaveChangesAsync();
 
                 return Ok(new
@@ -554,6 +729,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var projects = await _context.Projects
+                    .AsNoTracking()
                     .Where(p => !p.IsDeleted)
                     .Select(p => new ProjectResponseDTO
                     {
@@ -585,8 +761,9 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
+                var completionMap = await GetProjectCompletionPercentageMap(projects.Select(p => p.Id));
                 foreach (var p in projects)
-                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
+                    p.CompletionPercentage = completionMap.TryGetValue(p.Id, out var cp) ? cp : 0;
 
                 return Ok(projects);
             }
@@ -652,6 +829,7 @@ namespace TaskManagement.Controllers
             try
             {
                 var projects = await _context.Projects
+                    .AsNoTracking()
                     .Where(p => !p.IsDeleted && p.Members.Any(m => m.AccountId == accountId))
                     .Select(p => new ProjectResponseDTO
                     {
@@ -683,8 +861,9 @@ namespace TaskManagement.Controllers
                     })
                     .ToListAsync();
 
+                var completionMap = await GetProjectCompletionPercentageMap(projects.Select(p => p.Id));
                 foreach (var p in projects)
-                    p.CompletionPercentage = await GetProjectCompletionPercentage(p.Id);
+                    p.CompletionPercentage = completionMap.TryGetValue(p.Id, out var cp) ? cp : 0;
 
                 return Ok(projects);
             }
@@ -708,8 +887,8 @@ namespace TaskManagement.Controllers
                     .FirstOrDefaultAsync(m => m.ProjectId == id && m.AccountId == accountId && !m.IsDeleted);
 
                 var isAdmin = account.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                 if (!isAdmin && !isProjectManager)
                     return StatusCode(403, "Access denied. Admins and ProjectManagers only.");
@@ -720,8 +899,8 @@ namespace TaskManagement.Controllers
                     return NotFound("Project not found.");
 
                 project.IsDeleted = true;
-                project.DeletedAt = DateTime.UtcNow;
-                project.UpdatedAt = DateTime.UtcNow;
+                project.DeletedAt = PhTime;
+                project.UpdatedAt = PhTime;
 
                 var members = await _context.ProjectMembers
                     .Where(m => m.ProjectId == id && !m.IsDeleted)
@@ -729,7 +908,7 @@ namespace TaskManagement.Controllers
                 foreach (var member in members)
                 {
                     member.IsDeleted = true;
-                    member.DeletedAt = DateTime.UtcNow;
+                    member.DeletedAt = PhTime;
                 }
 
                 var tasks = await _context.Tasks
@@ -739,7 +918,7 @@ namespace TaskManagement.Controllers
                 foreach (var task in tasks)
                 {
                     task.IsDeleted = true;
-                    task.UpdatedAt = DateTime.UtcNow;
+                    task.UpdatedAt = PhTime;
 
                     var assignments = await _context.TaskAssignments
                         .Where(a => a.TaskId == task.Id && !a.IsDeleted)
@@ -748,20 +927,21 @@ namespace TaskManagement.Controllers
                     foreach (var assignment in assignments)
                     {
                         assignment.IsDeleted = true;
-                        assignment.DeletedAt = DateTime.UtcNow;
+                        assignment.DeletedAt = PhTime;
                     }
                 }
                
                 var deleterRole = account.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "Project Deleted",
+                    Action = "DELETED",
                     OldValue = project.Name,
-                    Note = $"Project deleted by {account.Name} ({deleterRole})"
+                    Note = $"Project '{project.Name}' deleted by {account.Name} ({deleterRole}).",
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();
@@ -837,8 +1017,8 @@ namespace TaskManagement.Controllers
                 var projectMemberRole = account.Role == "Admin" ? "Admin" : projectMember?.Role ?? "Unknown";
                 
                 var isAdmin = account.Role == "Admin";
-                var isProjectManager = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                var isProjectManager = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                 if (!isAdmin && !isProjectManager)
                     return StatusCode(403, "Access denied. Admins and ProjectManagers only.");
@@ -850,7 +1030,7 @@ namespace TaskManagement.Controllers
 
                 project.IsDeleted = false;
                 project.DeletedAt = null;
-                project.UpdatedAt = DateTime.UtcNow;
+                project.UpdatedAt = PhTime;
 
                 var members = await _context.ProjectMembers
                     .Where(m => m.ProjectId == projectId && m.IsDeleted)
@@ -867,7 +1047,7 @@ namespace TaskManagement.Controllers
                 foreach (var task in tasks)
                 {
                     task.IsDeleted = false;
-                    task.UpdatedAt = DateTime.UtcNow;
+                    task.UpdatedAt = PhTime;
 
                     var assignments = await _context.TaskAssignments
                         .Where(a => a.TaskId == task.Id && a.IsDeleted)
@@ -879,14 +1059,15 @@ namespace TaskManagement.Controllers
                     }
                 }
 
-                _context.TimeLogs.Add(new TimeLog
+                _context.AuditLogs.Add(new AuditLog
                 {
                     ProjectId = project.Id,
                     TaskId = null,
                     AccountId = accountId,
-                    Action = "Project Reactivated",
+                    Action = "RESTORED",
                     NewValue = project.Name,
-                    Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})"
+                    Note = $"Project and all tasks reactivated by {account.Name} ({projectMemberRole})",
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();

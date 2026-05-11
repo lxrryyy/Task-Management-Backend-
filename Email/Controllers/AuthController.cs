@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using DocumentFormat.OpenXml.Office2010.Excel;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -11,7 +12,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using TaskManagement.Data;
-using TaskManagement.DTOs;
+using TaskManagement.DTOs.Account;
 using TaskManagement.DTOs.Auth;
 using TaskManagement.Models;
 using TaskManagement.Services;
@@ -24,7 +25,8 @@ namespace TaskManagement.Controllers
     {
         private readonly AccountDbContext _context;
         private readonly IEmailService _emailService;
-
+        private static DateTime PhTime =>
+         TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public AuthController(AccountDbContext context, IEmailService emailService)
         {
             _context = context;
@@ -46,6 +48,9 @@ namespace TaskManagement.Controllers
                 if (account == null)
                     return Unauthorized("Invalid credentials");
 
+                if (!account.isActive)
+                    return Unauthorized("Your account has been deactivated. Please contact an administrator.");
+
                 var hasher = new PasswordHasher<Account>();
                 var verification = hasher.VerifyHashedPassword(account, account.PasswordHash, request.Password);
 
@@ -54,20 +59,23 @@ namespace TaskManagement.Controllers
 
                 var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
 
-                var expiry = request.RememberMe ? DateTime.UtcNow.AddDays(7) : DateTime.UtcNow.AddHours(8);
+                var expiry = request.RememberMe ? PhTime.AddDays(7) : PhTime.AddHours(1);
 
-                var apiToken = new ApiToken
-                {
-                    Token = token,
-                    AccountId = account.Id,
-                    Revoked = false,
-                    CreatedAt = DateTime.UtcNow,
-                    ExpiresAt = expiry
-                };
+                account.ApiToken = token;
+                account.TokenExpiresAt = expiry;
+                account.UpdatedAt = PhTime;
 
-                _context.ApiTokens.Add(apiToken);
                 await _context.SaveChangesAsync();
 
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = account.Id,
+                    Action = "Logged in",
+                    Note = $"Account {account.Name} is logged in.",
+                    CreatedAt = PhTime
+                });
+
+                await _context.SaveChangesAsync();
                 return Ok(new
                 {
                     token,
@@ -97,13 +105,27 @@ namespace TaskManagement.Controllers
 
                 var token = authHeader.Substring("Bearer ".Length).Trim();
 
-                var apiToken = await _context.ApiTokens
-                    .SingleOrDefaultAsync(t => t.Token == token && !t.Revoked);
+                var account = await _context.Accounts
+                    .SingleOrDefaultAsync(a => a.ApiToken == token);
 
-                if (apiToken == null)
-                    return NotFound("Token not found or already revoked.");
+                if (account == null)
+                    return Unauthorized("Invalid or expired token.");
 
-                apiToken.Revoked = true;
+                var logoutTime = PhTime;
+
+                account.ApiToken = null;
+                account.TokenExpiresAt = null;
+                account.UpdatedAt = logoutTime;
+                
+
+                _context.AuditLogs.Add(new AuditLog
+                {
+                    AccountId = account.Id,
+                    Action = "Logged out",
+                    Note = $"Account '{account.Name}' logged out.",
+                    CreatedAt = logoutTime
+                });
+
                 await _context.SaveChangesAsync();
 
                 return Ok("Logged out successfully.");
@@ -124,14 +146,19 @@ namespace TaskManagement.Controllers
 
                 var token = authHeader.Substring("Bearer ".Length).Trim();
 
-                var apiToken = await _context.ApiTokens
-                    .Include(t => t.Account)
-                    .SingleOrDefaultAsync(t => t.Token == token && !t.Revoked && t.ExpiresAt > DateTime.UtcNow);
+                var account = await _context.Accounts
+                    .SingleOrDefaultAsync(a => a.ApiToken == token);
 
-                if (apiToken == null)
-                    return Unauthorized("Invalid or expired token.");
+                if (account == null)
+                    return Unauthorized("Invalid token.");
 
-                var account = apiToken.Account;
+                if (account.TokenExpiresAt == null || account.TokenExpiresAt < PhTime)
+                {
+                    account.ApiToken = null;
+                    account.TokenExpiresAt = null;
+                    await _context.SaveChangesAsync();
+                    return Unauthorized("Token has expired. Please log in again.");
+                }
 
                 return Ok(new
                 {
@@ -164,7 +191,7 @@ namespace TaskManagement.Controllers
                     return NotFound("No account found with that email.");
 
                 var existingOtps = await _context.OtpCodes
-                    .Where(o => o.AccountId == account.Id && !o.IsUsed && o.ExpiresAt > DateTime.UtcNow)
+                    .Where(o => o.AccountId == account.Id && !o.IsUsed && o.ExpiresAt > PhTime)
                     .ToListAsync();
                 foreach (var old in existingOtps)
                     old.IsUsed = true;
@@ -175,9 +202,9 @@ namespace TaskManagement.Controllers
                 {
                     AccountId = account.Id,
                     Code = otp,
-                    ExpiresAt = DateTime.UtcNow.AddMinutes(15),
+                    ExpiresAt = PhTime.AddMinutes(15),
                     IsUsed = false,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = PhTime
                 });
 
                 await _context.SaveChangesAsync();
@@ -212,7 +239,7 @@ namespace TaskManagement.Controllers
                 if (otpRecord == null)
                     return BadRequest("Invalid OTP.");
 
-                if (otpRecord.ExpiresAt < DateTime.UtcNow)
+                if (otpRecord.ExpiresAt < PhTime)
                     return BadRequest("OTP has expired.");
 
                 otpRecord.IsUsed = true;
@@ -246,7 +273,7 @@ namespace TaskManagement.Controllers
                 if (verifiedOtp == null)
                     return BadRequest("OTP not verified. Please verify your OTP first.");
 
-                if (verifiedOtp.CreatedAt < DateTime.UtcNow.AddMinutes(-10))
+                if (verifiedOtp.CreatedAt < PhTime.AddMinutes(-10))
                     return BadRequest("Reset session expired. Please request a new OTP.");
 
                 if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
@@ -254,7 +281,7 @@ namespace TaskManagement.Controllers
 
                 var hasher = new PasswordHasher<Account>();
                 account.PasswordHash = hasher.HashPassword(account, request.NewPassword);
-                account.UpdatedAt = DateTime.UtcNow;
+                account.UpdatedAt = PhTime;
 
                 await _context.SaveChangesAsync();
 

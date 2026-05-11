@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TaskManagement.Data;
 
@@ -11,9 +12,11 @@ using TaskManagement.Data;
 namespace TaskManagement.Migrations
 {
     [DbContext(typeof(AccountDbContext))]
-    partial class AccountDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260317064553_AddProjectIdToNotifications")]
+    partial class AddProjectIdToNotifications
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -56,10 +59,6 @@ namespace TaskManagement.Migrations
 
                     b.Property<string>("Role")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Specialization")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
@@ -83,54 +82,11 @@ namespace TaskManagement.Migrations
                             CreatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             Email = "admin@admin.com",
                             Name = "Admin",
-                            PasswordHash = "AQAAAAIAAYagAAAAEDxMHg41N3VvF94PAuwamUoaymWWiPgdWmeYpoqrEBbOhE8FZxdLR3ffI9KupCo3Vw==",
+                            PasswordHash = "AQAAAAIAAYagAAAAEDsijb0q5GkTPCMhFv9uaJaCEYgJOz+WNSFiNEeocKiBOCS2zePdf8/xxhcGh2Hsww==",
                             Role = "Admin",
-                            Specialization = "",
                             UpdatedAt = new DateTime(2026, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified),
                             isActive = true
                         });
-                });
-
-            modelBuilder.Entity("TaskManagement.Models.AuditLog", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("AccountId")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("NewValue")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Note")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("OldValue")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("ProjectId")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("TaskId")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("TaskId");
-
-                    b.ToTable("AuditLogs");
                 });
 
             modelBuilder.Entity("TaskManagement.Models.Notification", b =>
@@ -468,9 +424,6 @@ namespace TaskManagement.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsWarningEmailSent")
-                        .HasColumnType("bit");
-
                     b.Property<int?>("ParentTaskId")
                         .HasColumnType("int");
 
@@ -567,6 +520,43 @@ namespace TaskManagement.Migrations
                         });
                 });
 
+            modelBuilder.Entity("TaskManagement.Models.TaskPermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("CanComment")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanDelete")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanEdit")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("CanView")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TaskPermissions");
+                });
+
             modelBuilder.Entity("TaskManagement.Models.TaskPriority", b =>
                 {
                     b.Property<int>("Id")
@@ -623,18 +613,44 @@ namespace TaskManagement.Migrations
                         });
                 });
 
-            modelBuilder.Entity("TaskManagement.Models.AuditLog", b =>
+            modelBuilder.Entity("TaskManagement.Models.TimeLog", b =>
                 {
-                    b.HasOne("TaskManagement.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId");
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
 
-                    b.HasOne("TaskManagement.Models.TaskItem", null)
-                        .WithMany("AuditLogs")
-                        .HasForeignKey("TaskId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Navigation("Project");
+                    b.Property<int>("AccountId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("NewValue")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OldValue")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TaskId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId");
+
+                    b.ToTable("TimeLogs");
                 });
 
             modelBuilder.Entity("TaskManagement.Models.Notification", b =>
@@ -773,6 +789,14 @@ namespace TaskManagement.Migrations
                     b.Navigation("Status");
                 });
 
+            modelBuilder.Entity("TaskManagement.Models.TimeLog", b =>
+                {
+                    b.HasOne("TaskManagement.Models.TaskItem", null)
+                        .WithMany("TimeLogs")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
             modelBuilder.Entity("TaskManagement.Models.Project", b =>
                 {
                     b.Navigation("Members");
@@ -784,11 +808,11 @@ namespace TaskManagement.Migrations
                 {
                     b.Navigation("Assignments");
 
-                    b.Navigation("AuditLogs");
-
                     b.Navigation("Comments");
 
                     b.Navigation("SubTasks");
+
+                    b.Navigation("TimeLogs");
                 });
 #pragma warning restore 612, 618
         }

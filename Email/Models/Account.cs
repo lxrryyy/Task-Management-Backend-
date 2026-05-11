@@ -21,12 +21,16 @@ namespace TaskManagement.Models
 
         [Required]
         [MaxLength(50)]
-        
+        public string? Specialization { get; set; } = null;
+
         public string Role { get; set; }
 
         public bool isActive { get; set; }
 
         public string? ProfilePicture { get; set; }
+
+        public string? ApiToken { get; set; }
+        public DateTime? TokenExpiresAt { get; set; }
 
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }

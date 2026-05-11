@@ -6,8 +6,8 @@ namespace TaskManagement
     public class ApiTokenMiddleware
     {
         private readonly RequestDelegate _next;
-
-        public ApiTokenMiddleware(RequestDelegate next) => _next = next;
+		private static DateTime PhTime => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+		public ApiTokenMiddleware(RequestDelegate next) => _next = next;
 
         public async Task InvokeAsync(HttpContext context, AccountDbContext db)
         {
@@ -35,13 +35,24 @@ namespace TaskManagement
                 ? authHeader.Substring(7).Trim()
                 : authHeader.Trim();
 
-            var apiToken = await db.ApiTokens
-                .SingleOrDefaultAsync(t => t.Token == token && !t.Revoked && t.ExpiresAt > DateTime.UtcNow);
+            var account = await db.Accounts
+                 .SingleOrDefaultAsync(a => a.ApiToken == token);
 
-            if (apiToken == null)
+            if (account == null)
             {
                 context.Response.StatusCode = 401;
-                await context.Response.WriteAsync("Invalid or expired token.");
+                await context.Response.WriteAsync("Invalid token.");
+                return;
+            }
+
+            if (account.TokenExpiresAt == null || account.TokenExpiresAt < PhTime)
+            {
+                account.ApiToken = null;
+                account.TokenExpiresAt = null;
+                await db.SaveChangesAsync();
+
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("Token has expired. Please log in again.");
                 return;
             }
 

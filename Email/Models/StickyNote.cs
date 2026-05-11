@@ -1,18 +1,16 @@
-﻿using System.ComponentModel.DataAnnotations;
-
-namespace TaskManagement.Models
+﻿namespace TaskManagement.Models
 {
-    public class TaskComment
+    public class StickyNote
     {
 
-		[Key]
-        public int Id { get; set; }
-        public int TaskId { get; set; }
+		public int Id { get; set; }
         public int AccountId { get; set; }
-        [Required]
         public string Content { get; set; } = string.Empty;
+        public bool IsPinned { get; set; } = false;
         public DateTime CreatedAt { get; set; } 
         public DateTime UpdatedAt { get; set; } 
         public bool IsDeleted { get; set; } = false;
+        public DateTime? DeletedAt { get; set; }
+        public Account Account { get; set; } = null!;
     }
 }

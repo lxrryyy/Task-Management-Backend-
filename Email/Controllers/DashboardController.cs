@@ -10,22 +10,112 @@ namespace TaskManagement.Controllers
     public class DashboardController : ControllerBase     
     {
         private readonly AccountDbContext _context;
-
+        private sealed class TaskRow
+        {
+            public int Id { get; init; }
+            public int ProjectId { get; init; }
+            public string Title { get; init; } = string.Empty;
+            public string? Description { get; init; }
+            public int StatusId { get; init; }
+            public string StatusName { get; init; } = string.Empty;
+            public int? PriorityId { get; init; }
+            public string PriorityName { get; init; } = string.Empty;
+            public int? StoryPoints { get; init; }
+            public DateTime? StartDate { get; init; }
+            public DateTime? DueDate { get; init; }
+            public DateTime CreatedAt { get; init; }
+            public DateTime? UpdatedAt { get; init; }
+            public int? ParentTaskId { get; init; }
+            public List<int> AssigneeIds { get; init; } = new();
+        }
+        private static DateTime PhTime =>
+            TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
         public DashboardController(AccountDbContext context)
         {
             _context = context;
         }
 
+        [HttpGet("GetDashboardAdminStats")]
+        public async Task<IActionResult> GetDashboardAdminStats()
+        {
+            try
+            {
+                var totalUsers = await _context.Accounts
+                    .Where(a => a.isActive)
+                    .CountAsync();
+
+                var totalProjects = await _context.Projects
+                    .Where(p => !p.IsDeleted)
+                    .CountAsync();
+
+                var overdueTasks = await _context.Tasks
+                    .Where(t => !t.IsDeleted && t.DueDate < PhTime && t.StatusId != 4)
+                    .CountAsync();
+
+                var deactivatedUsers = await _context.Accounts
+                    .Where(a => !a.isActive)
+                    .CountAsync();
+                return Ok(new
+                {
+                    totalUsers,
+                    totalProjects,
+                    overdueTasks,
+                    deactivatedUsers
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpGet("GetDashboardUserStats")]
+        public async Task<IActionResult> GetDashboardUserStats()
+        {
+            try
+            {
+                var totalUsers = await _context.Accounts
+                    .Where(a => a.isActive)
+                    .CountAsync();
+
+                var totalProjects = await _context.Projects
+                    .Where(p => !p.IsDeleted)
+                    .CountAsync();
+
+                var overdueTasks = await _context.Tasks
+                    .Where(t => !t.IsDeleted && t.DueDate < PhTime && t.StatusId != 4)
+                    .CountAsync();
+
+                var completedTasks = await _context.Tasks
+                    .Where(t => !t.IsDeleted && t.StatusId == 4)
+                    .CountAsync();
+
+                return Ok(new
+                {
+                    totalUsers,
+                    totalProjects,
+                    overdueTasks,
+                    completedTasks
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
         [HttpGet("MyProjectsAndTasks")]   // return all projects and tasks with subtasks
         public async Task<IActionResult> GetMyProjectsAndTasks([FromQuery] int requesterId)
         {
             try
             {
-                var requester = await _context.Accounts.FindAsync(requesterId);
+                var requester = await _context.Accounts
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(a => a.Id == requesterId);
                 if (requester == null)
                     return NotFound("Account not found.");
 
                 IQueryable<Project> projectQuery = _context.Projects
+                    .AsNoTracking()
                     .Where(p => !p.IsDeleted);
 
                 if (requester.Role != "Admin")
@@ -38,66 +128,104 @@ namespace TaskManagement.Controllers
                 }
 
                 var projects = await projectQuery
-                .Select(p => new
-                {
-                    p.Id,
-                    p.Name,
-                    p.Description,
-                    p.StatusId,
-                    StatusName = p.Status.Name,
-                    p.CreatedAt,
-                    p.UpdatedAt,
-                    RootTasks = _context.Tasks
-                        .Where(t => t.ProjectId == p.Id && !t.IsDeleted && t.ParentTaskId == null &&
-                            (requester.Role == "Admin" ||
-                             _context.TaskAssignments.Any(a => a.TaskId == t.Id && a.AccountId == requesterId && !a.IsDeleted) ||
-                             _context.ProjectMembers.Any(m => m.ProjectId == p.Id && m.AccountId == requesterId && !m.IsDeleted &&
-                                 (m.Role == "ProjectManager" || m.Role == "ScrumMaster" || m.Role == "ProjectManager-ScrumMaster"))))
-                        .Select(t => new
-                        {
-                            t.Id,
-                            t.Title,
-                            t.Description,
-                            t.StatusId,
-                            StatusName = t.Status.Name,
-                            t.PriorityId,
-                            PriorityName = t.Priority.Name,
-                            t.StoryPoints,
-                            t.StartDate,
-                            t.DueDate,
-                            t.CreatedAt,
-                            t.UpdatedAt,
-                            AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
-                        }).ToList()
-                })
-                .ToListAsync();
+                    .Select(p => new
+                    {
+                        p.Id,
+                        p.Name,
+                        p.Description,
+                        p.StatusId,
+                        StatusName = p.Status.Name,
+                        p.CreatedAt,
+                        p.UpdatedAt
+                    })
+                    .ToListAsync();
 
-                var finalResult = new List<object>();
+                if (projects.Count == 0)
+                    return Ok(Array.Empty<object>());
+
+                var projectIds = projects.Select(p => p.Id).ToList();
+
+                var allTaskRows = await _context.Tasks
+                    .AsNoTracking()
+                    .Where(t => projectIds.Contains(t.ProjectId) && !t.IsDeleted)
+                    .Select(t => new TaskRow
+                    {
+                        Id = t.Id,
+                        ProjectId = t.ProjectId,
+                        Title = t.Title,
+                        Description = t.Description,
+                        StatusId = t.StatusId,
+                        StatusName = t.Status.Name,
+                        PriorityId = t.PriorityId,
+                        PriorityName = t.Priority.Name,
+                        StoryPoints = t.StoryPoints,
+                        StartDate = t.StartDate,
+                        DueDate = t.DueDate,
+                        CreatedAt = t.CreatedAt,
+                        UpdatedAt = t.UpdatedAt,
+                        ParentTaskId = t.ParentTaskId,
+                        AssigneeIds = t.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
+                    })
+                    .ToListAsync();
+
+                var privilegedProjectIds = new HashSet<int>();
+                if (requester.Role != "Admin")
+                {
+                    var privilegedRoles = new[] { "Project Manager", "Scrum Master", "Project Manager - Scrum Master" };
+                    var ids = await _context.ProjectMembers
+                        .AsNoTracking()
+                        .Where(m =>
+                            m.AccountId == requesterId &&
+                            !m.IsDeleted &&
+                            projectIds.Contains(m.ProjectId) &&
+                            privilegedRoles.Contains(m.Role))
+                        .Select(m => m.ProjectId)
+                        .ToListAsync();
+                    privilegedProjectIds = ids.ToHashSet();
+                }
+
+                var byProject = allTaskRows.GroupBy(t => t.ProjectId).ToDictionary(g => g.Key, g => g.ToList());
+                var result = new List<object>(projects.Count);
+
                 foreach (var project in projects)
                 {
-                    var tasksWithSubtasks = new List<object>();
-                    foreach (var task in project.RootTasks)
+                    var tasks = byProject.TryGetValue(project.Id, out var pTasks) ? pTasks : new List<TaskRow>();
+                    var childrenByParent = tasks
+                        .Where(t => t.ParentTaskId.HasValue)
+                        .GroupBy(t => t.ParentTaskId!.Value)
+                        .ToDictionary(g => g.Key, g => g.OrderBy(x => x.Id).ToList());
+
+                    var rootTasks = tasks.Where(t => !t.ParentTaskId.HasValue).ToList();
+                    if (requester.Role != "Admin" && !privilegedProjectIds.Contains(project.Id))
                     {
-                        tasksWithSubtasks.Add(new
-                        {
-                            task.Id,
-                            task.Title,
-                            task.Description,
-                            task.StatusId,
-                            task.StatusName,
-                            task.PriorityId,
-                            task.PriorityName,
-                            task.StoryPoints,
-                            task.StartDate,
-                            task.DueDate,
-                            task.CreatedAt,
-                            task.UpdatedAt,
-                            task.AssigneeIds,
-                            Subtasks = await GetSubtasksRecursive(task.Id)
-                        });
+                        rootTasks = rootTasks
+                            .Where(t => t.AssigneeIds.Contains(requesterId))
+                            .ToList();
                     }
 
-                    finalResult.Add(new
+                    object BuildTaskTree(TaskRow row)
+                    {
+                        var children = childrenByParent.TryGetValue(row.Id, out var list) ? list : new List<TaskRow>();
+                        return new
+                        {
+                            row.Id,
+                            row.Title,
+                            row.Description,
+                            row.StatusId,
+                            row.StatusName,
+                            row.PriorityId,
+                            row.PriorityName,
+                            row.StoryPoints,
+                            row.StartDate,
+                            row.DueDate,
+                            row.CreatedAt,
+                            row.UpdatedAt,
+                            row.AssigneeIds,
+                            Subtasks = children.Select(BuildTaskTree).ToList()
+                        };
+                    }
+
+                    result.Add(new
                     {
                         project.Id,
                         project.Name,
@@ -106,63 +234,16 @@ namespace TaskManagement.Controllers
                         project.StatusName,
                         project.CreatedAt,
                         project.UpdatedAt,
-                        Tasks = tasksWithSubtasks
+                        Tasks = rootTasks.OrderBy(t => t.Id).Select(BuildTaskTree).ToList()
                     });
                 }
 
-                return Ok(finalResult);
+                return Ok(result);
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { error = ex.Message });
             }
-        }
-
-        private async Task<List<object>> GetSubtasksRecursive(int parentId)
-        {
-            var subtasks = await _context.Tasks
-                .Where(s => s.ParentTaskId == parentId && !s.IsDeleted)
-                .Select(s => new
-                {
-                    s.Id,
-                    s.Title,
-                    s.Description,
-                    s.StatusId,
-                    StatusName = s.Status.Name,
-                    s.PriorityId,
-                    PriorityName = s.Priority.Name,
-                    s.StoryPoints,
-                    s.StartDate,
-                    s.DueDate,
-                    s.CreatedAt,
-                    s.UpdatedAt,
-                    AssigneeIds = s.Assignments.Where(a => !a.IsDeleted).Select(a => a.AccountId).ToList()
-                })
-                .ToListAsync();
-
-            var result = new List<object>();
-            foreach (var subtask in subtasks)
-            {
-                result.Add(new
-                {
-                    subtask.Id,
-                    subtask.Title,
-                    subtask.Description,
-                    subtask.StatusId,
-                    subtask.StatusName,
-                    subtask.PriorityId,
-                    subtask.PriorityName,
-                    subtask.StoryPoints,
-                    subtask.StartDate,
-                    subtask.DueDate,
-                    subtask.CreatedAt,
-                    subtask.UpdatedAt,
-                    subtask.AssigneeIds,
-                    Subtasks = await GetSubtasksRecursive(subtask.Id) 
-                });
-            }
-
-            return result;
         }
 
         [HttpGet("ProjectStatusSummary")] // return count and percentage (Active, Completed, Not Started)-PROJECTS
@@ -250,9 +331,9 @@ namespace TaskManagement.Controllers
                             m.ProjectId == t.ProjectId &&
                             m.AccountId == requesterId &&
                             !m.IsDeleted &&
-                            (m.Role == "ProjectManager" ||
-                             m.Role == "ScrumMaster" ||
-                             m.Role == "ProjectManager-ScrumMaster")));
+                            (m.Role == "Project Manager" ||
+                             m.Role == "Scrum Master" ||
+                             m.Role == "Project Manager - Scrum Master")));
                 }
 
                 var total = await taskQuery.CountAsync();
@@ -325,9 +406,9 @@ namespace TaskManagement.Controllers
                     var projectMember = await _context.ProjectMembers
                         .FirstOrDefaultAsync(m => m.ProjectId == projectId && m.AccountId == requesterId && !m.IsDeleted);
 
-                    var isPrivileged = projectMember?.Role == "ProjectManager" ||
-                                       projectMember?.Role == "ScrumMaster" ||
-                                       projectMember?.Role == "ProjectManager-ScrumMaster";
+                    var isPrivileged = projectMember?.Role == "Project Manager" ||
+                                       projectMember?.Role == "Scrum Master" ||
+                                       projectMember?.Role == "Project Manager - Scrum Master";
 
                     if (!isPrivileged)
                     {

@@ -1,8 +1,5 @@
-﻿using TaskManagement.Data;
-using TaskManagement.DTOs.Notification;
-using TaskManagement.Models;
-using TaskManagement.Services;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
+using TaskManagement.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace TaskManagement.Controllers
@@ -12,15 +9,12 @@ namespace TaskManagement.Controllers
     public class NotificationController : ControllerBase
     {
         private readonly AccountDbContext _context;
-        private readonly IEmailService _emailService;
 
-        public NotificationController(AccountDbContext context, IEmailService emailService)
+        public NotificationController(AccountDbContext context)
         {
             _context = context;
-            _emailService = emailService;
         }
 
-        // GET all notifications for a user
         [HttpGet("GetNotifications/{accountId}")]
         public async Task<IActionResult> GetNotifications(int accountId)
         {
@@ -29,6 +23,16 @@ namespace TaskManagement.Controllers
                 var notifications = await _context.Notifications
                     .Where(n => n.AccountId == accountId)
                     .OrderByDescending(n => n.CreatedAt)
+                    .Select(n => new
+                    {
+                        n.Id,
+                        n.AccountId,
+                        n.ProjectId,
+                        n.TaskId,
+                        n.Message,
+                        n.IsRead,
+                        n.CreatedAt
+                    })
                     .ToListAsync();
 
                 return Ok(notifications);
@@ -39,210 +43,108 @@ namespace TaskManagement.Controllers
             }
         }
 
-        // PATCH mark notification as read
-        [HttpPatch("MarkAsRead/{notificationId}")]
-        public async Task<IActionResult> MarkAsRead(int notificationId)
-        {
-            try
-            {
-                var notification = await _context.Notifications.FindAsync(notificationId);
-
-                if (notification == null)
-                    return NotFound("Notification not found.");
-
-                notification.IsRead = true;
-                await _context.SaveChangesAsync();
-
-                return NoContent();
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
-
-        // PATCH mark all notifications as read
-        [HttpPatch("MarkAllAsRead/{accountId}")]
-        public async Task<IActionResult> MarkAllAsRead(int accountId)
+        [HttpGet("GetUnreadNotifications/{accountId}")]
+        public async Task<IActionResult> GetUnreadNotifications(int accountId)
         {
             try
             {
                 var notifications = await _context.Notifications
                     .Where(n => n.AccountId == accountId && !n.IsRead)
-                    .ToListAsync();
-
-                foreach (var notification in notifications)
-                {
-                    notification.IsRead = true;
-                }
-
-                await _context.SaveChangesAsync();
-                return NoContent();
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
-
-        // POST send task assigned notification
-        [HttpPost("SendTaskAssigned/{taskId}")]
-        public async Task<IActionResult> SendTaskAssigned(int taskId, [FromQuery] int adminId)
-        {
-            try
-            {
-                var task = await _context.Tasks.FindAsync(taskId);
-
-                if (task == null || task.IsDeleted)
-                    return NotFound("Task not found.");
-
-                // Get all assignees
-                var assignees = await _context.TaskAssignments
-                    .Where(a => a.TaskId == taskId)
-                    .ToListAsync();
-
-                if (!assignees.Any())
-                    return BadRequest("No assignees found for this task.");
-
-                foreach (var assignment in assignees)
-                {
-                    var account = await _context.Accounts.FindAsync(assignment.AccountId);
-
-                    if (account == null) continue;
-
-                    // Save notification to db
-                    _context.Notifications.Add(new Notification
+                    .OrderByDescending(n => n.CreatedAt)
+                    .Select(n => new
                     {
-                        AccountId = assignment.AccountId,
-                        TaskId = taskId,
-                        Message = $"You have been assigned to task: {task.Title}",
-                        Type = "TaskAssigned",
-                        IsRead = false,
-                        CreatedAt = DateTime.UtcNow
-                    });
-
-                    // Send email
-                    await _emailService.SendTaskAssignedAsync(account.Email, task.Title, taskId);
-                }
-
-                await _context.SaveChangesAsync();
-                return Ok("Notifications sent successfully.");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
-
-        // POST send status changed notification
-        [HttpPost("SendStatusChanged/{taskId}")]
-        public async Task<IActionResult> SendStatusChanged(int taskId, [FromQuery] string newStatus)
-        {
-            try
-            {
-                var task = await _context.Tasks.FindAsync(taskId);
-
-                if (task == null || task.IsDeleted)
-                    return NotFound("Task not found.");
-
-                var assignees = await _context.TaskAssignments
-                    .Where(a => a.TaskId == taskId)
+                        n.Id,
+                        n.AccountId,
+                        n.ProjectId,
+                        n.TaskId,
+                        n.Message,
+                        n.IsRead,
+                        n.CreatedAt
+                    })
                     .ToListAsync();
 
-                foreach (var assignment in assignees)
-                {
-                    var account = await _context.Accounts.FindAsync(assignment.AccountId);
-
-                    if (account == null) continue;
-
-                    _context.Notifications.Add(new Notification
-                    {
-                        AccountId = assignment.AccountId,
-                        TaskId = taskId,
-                        Message = $"Task '{task.Title}' status changed to: {newStatus}",
-                        Type = "StatusChanged",
-                        IsRead = false,
-                        CreatedAt = DateTime.UtcNow
-                    });
-
-                    await _emailService.SendStatusChangedAsync(account.Email, task.Title, newStatus);
-                }
-
-                await _context.SaveChangesAsync();
-                return Ok("Notifications sent successfully.");
+                return Ok(notifications);
             }
             catch (Exception ex)
             {
                 return StatusCode(500, new { error = ex.Message });
             }
         }
-
-        // POST send deadline reminder
-        [HttpPost("SendDeadlineReminder/{taskId}")]
-        public async Task<IActionResult> SendDeadlineReminder(int taskId)
+        [HttpPut("{id}/read")]
+        public async Task<IActionResult> MarkAsRead(int id)
         {
             try
             {
-                var task = await _context.Tasks.FindAsync(taskId);
+                var notification = await _context.Notifications.FindAsync(id);
+                if (notification == null)
+                    return NotFound(new { message = "Notification not found." });
 
-                if (task == null || task.IsDeleted)
-                    return NotFound("Task not found.");
+                if (notification.IsRead)
+                    return Ok(new { message = "Notification is already marked as read." });
 
-                if (task.DueDate == null)
-                    return BadRequest("Task has no due date.");
-
-                var assignees = await _context.TaskAssignments
-                    .Where(a => a.TaskId == taskId)
-                    .ToListAsync();
-
-                foreach (var assignment in assignees)
-                {
-                    var account = await _context.Accounts.FindAsync(assignment.AccountId);
-
-                    if (account == null) continue;
-
-                    _context.Notifications.Add(new Notification
-                    {
-                        AccountId = assignment.AccountId,
-                        TaskId = taskId,
-                        Message = $"Reminder: Task '{task.Title}' is due on {task.DueDate:MMMM dd, yyyy}",
-                        Type = "DeadlineReminder",
-                        IsRead = false,
-                        CreatedAt = DateTime.UtcNow
-                    });
-
-                    await _emailService.SendDeadlineReminderAsync(account.Email, task.Title, task.DueDate.Value);
-                }
-
+                notification.IsRead = true;
                 await _context.SaveChangesAsync();
-                return Ok("Deadline reminders sent successfully.");
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
-            }
-        }
 
-        // POST set notification settings
-        [HttpPost("SetNotificationSettings")]
-        public async Task<IActionResult> SetNotificationSettings([FromBody] NotificationSettingDTO dto)
-        {
-            try
-            {
-                // Save settings to db as a notification record for reference
-                _context.Notifications.Add(new Notification
+                return Ok(new
                 {
-                    AccountId = dto.AccountId,
-                    Message = $"Settings: EmailOnAssign={dto.EmailOnAssign}, " +
-                              $"EmailOnStatusChange={dto.EmailOnStatusChange}, " +
-                              $"ReminderDaysBefore={dto.DeadlineReminderDaysBefore}",
-                    Type = "Settings",
-                    IsRead = true,
-                    CreatedAt = DateTime.UtcNow
+                    message = "Notification marked as read.",
+                    notificationId = notification.Id,
+                    isRead = notification.IsRead
                 });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // PUT api/notifications/read-all?accountId=1
+        [HttpPut("read-all")]
+        public async Task<IActionResult> MarkAllAsRead([FromQuery] int accountId)
+        {
+            try
+            {
+                var account = await _context.Accounts.FindAsync(accountId);
+                if (account == null)
+                    return NotFound(new { message = "Account not found." });
+
+                var notifications = await _context.Notifications
+                    .Where(n => n.AccountId == accountId && !n.IsRead)
+                    .ToListAsync();
+
+                if (!notifications.Any())
+                    return Ok(new { message = "No unread notifications found.", markedAsRead = 0 });
+
+                foreach (var n in notifications)
+                    n.IsRead = true;
 
                 await _context.SaveChangesAsync();
-                return Ok("Notification settings saved.");
+
+                return Ok(new
+                {
+                    message = $"{notifications.Count} notification(s) marked as read.",
+                    markedAsRead = notifications.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpDelete("DeleteNotification/{id}")]
+        public async Task<IActionResult> DeleteNotification(int id)
+        {
+            try
+            {
+                var notification = await _context.Notifications.FindAsync(id);
+                if (notification == null)
+                    return NotFound("Notification not found.");
+
+                _context.Notifications.Remove(notification);
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Notification deleted." });
             }
             catch (Exception ex)
             {

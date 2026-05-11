@@ -1,20 +1,34 @@
 ﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using System.Linq;
 using TaskManagement;
 using TaskManagement.Data;
 using TaskManagement.Models;
 using TaskManagement.Services;
-
+using Microsoft.EntityFrameworkCore.Diagnostics;
+using Hangfire;
+using Hangfire.SqlServer;
+using TaskManagement.Jobs;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/json"
+    });
+});
 builder.Services.AddRateLimiter(options =>
 {
     options.AddFixedWindowLimiter("fixed", opt =>
@@ -23,6 +37,7 @@ builder.Services.AddRateLimiter(options =>
         opt.Window = TimeSpan.FromMinutes(1);
     });
 });
+
 // Swagger configuration
 builder.Services.AddSwaggerGen(options =>
 {
@@ -67,11 +82,16 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // DbContext registration
-builder.Services.AddDbContext<AccountDbContext>(options =>
+builder.Services.AddDbContextPool<AccountDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
-        sql => sql.EnableRetryOnFailure()
-    ));
+        sqlOptions => sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(10),
+            errorNumbersToAdd: null
+        )
+    )
+    .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning)));
 
 // Authentication
 var jwtSettings = builder.Configuration.GetSection("Jwt");
@@ -81,6 +101,15 @@ builder.Services.AddAuthentication();
 builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<IEmailService, EmailService>(); // EMAILS
+builder.Services.AddScoped<NotificationService>();
+builder.Services.AddHangfire(config => config
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseSqlServerStorage(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddHangfireServer();
+builder.Services.AddScoped<DueTaskWarningJob>();
 
 var app = builder.Build();
 
@@ -118,10 +147,17 @@ app.UseSwaggerUI(c =>
 });
 
 app.UseStaticFiles();
+app.UseResponseCompression();
 app.UseHttpsRedirection();
 app.UseMiddleware<ApiKeyMiddleware>();
 app.UseMiddleware<ApiTokenMiddleware>();
+app.UseHangfireDashboard("/hangfire");
 
+RecurringJob.AddOrUpdate<DueTaskWarningJob>(
+    "due-task-warning",
+    job => job.RunAsync(),
+    "0 * * * *"  // every hour
+);
 app.MapControllers();
 
 app.Run();

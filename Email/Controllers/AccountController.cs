@@ -5,11 +5,13 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Runtime.CompilerServices;
+using System.Security.Claims;
 using System.Security.Principal;
 using System.Threading.Tasks;
 using TaskManagement.Data;
-using TaskManagement.DTOs;
+using TaskManagement.DTOs.Account;
 using TaskManagement.Models;
+using TaskManagement.Services;
 
 namespace TaskManagement.Controllers
 {
@@ -20,23 +22,110 @@ namespace TaskManagement.Controllers
         private readonly AccountDbContext _context;
         private readonly PasswordHasher<Account> _passwordHasher = new PasswordHasher<Account>();
         private readonly IConfiguration _config;
-        public AccountController(AccountDbContext context, IConfiguration config)
+        private readonly IEmailService _emailService;
+        private static DateTime PhTime =>
+        	TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, TimeZoneInfo.FindSystemTimeZoneById("Asia/Manila"));
+		public AccountController(AccountDbContext context, IConfiguration config, IEmailService emailService)
         {
             _context = context;
             _config = config;
+            _emailService = emailService;
         }
 
         [HttpGet]
-        public async Task<ActionResult<List<Account>>> GetAccountsv1()
+        public async Task<ActionResult<List<Account>>> GetAccounts()
         {
             try
             {
-                return Ok(await _context.Accounts.ToListAsync());
+                var accounts = await _context.Accounts
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Name,
+                        a.Email,
+                        a.Role,
+                        a.isActive,
+                        a.Specialization,
+                        a.CreatedAt,
+                        a.UpdatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(accounts);
             }
             catch (Exception ex)
             {
                 return BadRequest($"Internal server error: {ex.Message}");
             }
+        }
+
+        [HttpGet]
+        public async Task<ActionResult> GetAllUsersWithStats()
+        {
+            try
+            {
+                var users = await _context.Accounts
+                    .Where(a => a.Role == "User")
+                    .Select(a => new
+                    {
+                        a.Id,
+                        a.Name,
+                        a.Email,
+                        a.Role,
+                        a.isActive,
+                        a.Specialization,
+                        a.CreatedAt,
+                        ProjectCount = _context.ProjectMembers
+                            .Count(pm => pm.AccountId == a.Id),
+                        ActiveTaskCount = _context.TaskAssignments
+                            .Count(ta => ta.AccountId == a.Id &&
+                                        !ta.IsDeleted &&
+                                        _context.Tasks.Any(t => t.Id == ta.TaskId &&
+                                                               !t.IsDeleted &&
+                                                               (t.StatusId == 1 || t.StatusId == 2 || t.StatusId == 3)))
+                    })
+                    .ToListAsync();
+
+                if (!users.Any())
+                    return NotFound("No users found.");
+
+                return Ok(users);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+
+        [HttpGet]
+        public IActionResult GeneratePassword()
+        {
+            const string upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            const string lower = "abcdefghijklmnopqrstuvwxyz";
+            const string digits = "0123456789";
+            const string special = "!@#$%^&*()_+-=[]{}|;':\",./<>?";
+            const string all = upper + lower + digits + special;
+
+            var random = new Random();
+
+            // Guarantee at least one of each required character type
+            var password = new List<char>
+            {
+                upper[random.Next(upper.Length)],
+                lower[random.Next(lower.Length)],
+                digits[random.Next(digits.Length)],
+                special[random.Next(special.Length)]
+            };
+
+            // Fill the rest up to 12 characters
+            for (int i = password.Count; i < 12; i++)
+                password.Add(all[random.Next(all.Length)]);
+
+            // Shuffle so the guaranteed characters aren't always at the start
+            var shuffled = password.OrderBy(_ => random.Next()).ToArray();
+
+            return Ok(new { password = new string(shuffled) });
         }
 
         [HttpGet]
@@ -69,104 +158,244 @@ namespace TaskManagement.Controllers
         }
 
         [HttpGet("{id}")]
-        public async Task<ActionResult<Account>> GetAccountById(int id, [FromQuery] int adminId)
+        public async Task<IActionResult> GetAccountById(int id)
         {
-            var admin = await _context.Accounts.FindAsync(adminId);
-            if (admin == null || admin.Role != "Admin")
-                return StatusCode(403, "Access denied. Admins only.");
-
             var account = await _context.Accounts.FindAsync(id);
             if (account == null)
-                return NotFound();
+                return NotFound("Account not found.");
 
-            return Ok(account);
+            return Ok(new
+            {
+                account.Name,
+                account.Email,
+                account.Role,
+                account.Specialization,
+                account.isActive,
+                account.ProfilePicture,
+            });
         }
 
         [HttpPost]
-        public async Task<ActionResult<Account>> CreateAccount([FromBody] Account newAccount, [FromQuery] int adminId)
+        public async Task<ActionResult<Account>> CreateAccount([FromBody] CreateAccountDTO dto, [FromQuery] int adminId)
         {
             var admin = await _context.Accounts.FindAsync(adminId);
             if (admin == null || admin.Role != "Admin")
                 return StatusCode(403, "Access denied. Admins only.");
 
-            if (newAccount is null)
+            if (dto is null)
                 return BadRequest();
 
             if (!System.Text.RegularExpressions.Regex.IsMatch(
-                newAccount.Email,
+                dto.Email,
                 @"^[^@\s]+@[^@\s]+\.com$",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase))
             {
                 return BadRequest("Email must follow the format example@domain.com.");
             }
 
-            // Validate password requirements
-            var password = newAccount.PasswordHash;
-            if (password.Length < 8)
+            if (dto.Password.Length < 8)
                 return BadRequest("Password must be at least 8 characters.");
-            if (!password.Any(char.IsUpper))
+            if (!dto.Password.Any(char.IsUpper))
                 return BadRequest("Password must contain at least one uppercase letter.");
-            if (!password.Any(char.IsLower))
+            if (!dto.Password.Any(char.IsLower))
                 return BadRequest("Password must contain at least one lowercase letter.");
-            if (!password.Any(char.IsDigit))
+            if (!dto.Password.Any(char.IsDigit))
                 return BadRequest("Password must contain at least one number.");
-            if (!password.Any(ch => "!@#$%^&*()_+-=[]{}|;':\",./<>?".Contains(ch)))
+            if (!dto.Password.Any(ch => "!@#$%^&*()_+-=[]{}|;':\",./<>?".Contains(ch)))
                 return BadRequest("Password must contain at least one special character (!@#$%^&*...).");
 
-            
-
-            // check if email already exists
             var emailExists = await _context.Accounts
-                .AnyAsync(a => a.Email.ToLower() == newAccount.Email.ToLower());
+                .AnyAsync(a => a.Email.ToLower() == dto.Email.ToLower());
             if (emailExists)
                 return BadRequest("Email already exists.");
 
-            newAccount.PasswordHash = _passwordHasher.HashPassword(newAccount, newAccount.PasswordHash);
-            newAccount.CreatedAt = DateTime.UtcNow;
-            newAccount.UpdatedAt = DateTime.UtcNow;
+            var newAccount = new Account
+            {
+                Name = dto.Name,
+                Email = dto.Email,
+                Specialization = dto.Specialization,
+                Role = dto.Role,
+                isActive = dto.isActive,
+                CreatedAt = PhTime,
+                UpdatedAt = PhTime
+            };
+
+            newAccount.PasswordHash = _passwordHasher.HashPassword(newAccount, dto.Password);
 
             _context.Accounts.Add(newAccount);
             await _context.SaveChangesAsync();
 
-            _context.TimeLogs.Add(new TimeLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
-                Action = "AccountCreated",
+                Action = "CREATED",
                 NewValue = newAccount.Name,
-                Note = $"Account created by {admin.Name}, ({admin.Role})",
-                CreatedAt = DateTime.UtcNow
+                Note = $"User {newAccount.Name} was created by {admin.Name}.",
+                CreatedAt = PhTime
             });
-            return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, newAccount);
+            await _context.SaveChangesAsync();
+
+            ///sending ng email
+            await _emailService.SendAccountCreatedAsync(newAccount.Email, newAccount.Name, dto.Password);
+
+            return CreatedAtAction(nameof(GetAccountById), new { id = newAccount.Id }, new
+            {
+                newAccount.Id,
+                newAccount.Name,
+                newAccount.Email,
+                newAccount.Role,
+                newAccount.Specialization,
+                newAccount.isActive,
+                newAccount.CreatedAt
+            });
         }
-
         [HttpPatch("{id}")]
-        public async Task<IActionResult> UpdateAccount(int id, [FromBody] UpdateAccountDto updatedAccount, [FromQuery] int adminId)
+        public async Task<IActionResult> UpdateAccount(int id, [FromQuery] int editorId, [FromBody] UpdateAccountDto updatedAccount)
         {
-            var admin = await _context.Accounts.FindAsync(adminId);
-            if (admin == null || admin.Role != "Admin")
-                return StatusCode(403, "Access denied. Admins only.");
-
+            // Fetch the account being edited
             var existingAccount = await _context.Accounts.FindAsync(id);
             if (existingAccount == null)
-                return NotFound();
+                return NotFound("Account not found.");
 
-            if (updatedAccount.Name != null)
+            // Fetch the editor (who is making the change)
+            var editorAccount = await _context.Accounts.FindAsync(editorId);
+            if (editorAccount == null)
+                return NotFound("Editor account not found.");
+
+            var changes = new List<string>();
+
+            if (updatedAccount.Name != null && updatedAccount.Name != existingAccount.Name)
+            {
+                changes.Add("Name");
                 existingAccount.Name = updatedAccount.Name;
-            if (updatedAccount.Email != null)
-                existingAccount.Email = updatedAccount.Email;
-            if (updatedAccount.PasswordHash != null)
-                existingAccount.PasswordHash = _passwordHasher.HashPassword(existingAccount, updatedAccount.PasswordHash);
-            if (updatedAccount.Role != null)
-                existingAccount.Role = updatedAccount.Role;
-            if (updatedAccount.isActive.HasValue)
-                existingAccount.isActive = updatedAccount.isActive.Value;
-            if (updatedAccount.ProfilePicture != null)
-                existingAccount.ProfilePicture = updatedAccount.ProfilePicture;
+            }
 
-            existingAccount.UpdatedAt = DateTime.UtcNow;
+            if (updatedAccount.CurrentPassword != null ||
+                updatedAccount.NewPassword != null ||
+                updatedAccount.ConfirmPassword != null)
+            {
+                if (string.IsNullOrWhiteSpace(updatedAccount.CurrentPassword))
+                    return BadRequest("Current password is required.");
+                if (string.IsNullOrWhiteSpace(updatedAccount.NewPassword))
+                    return BadRequest("New password is required.");
+                if (string.IsNullOrWhiteSpace(updatedAccount.ConfirmPassword))
+                    return BadRequest("Confirm password is required.");
+
+                var verifyResult = _passwordHasher.VerifyHashedPassword(
+                    existingAccount,
+                    existingAccount.PasswordHash,
+                    updatedAccount.CurrentPassword);
+
+                if (verifyResult == PasswordVerificationResult.Failed)
+                    return BadRequest("Current password is incorrect.");
+
+                if (updatedAccount.NewPassword != updatedAccount.ConfirmPassword)
+                    return BadRequest("New password and confirm password do not match.");
+
+                if (updatedAccount.CurrentPassword == updatedAccount.NewPassword)
+                    return BadRequest("New password must be different from the current password.");
+
+                existingAccount.PasswordHash = _passwordHasher.HashPassword(
+                    existingAccount,
+                    updatedAccount.NewPassword);
+
+                changes.Add("Password");
+            }
+
+            if (updatedAccount.Role != null && updatedAccount.Role != existingAccount.Role)
+            {
+                changes.Add("Role");
+                existingAccount.Role = updatedAccount.Role;
+            }
+
+            if (updatedAccount.isActive.HasValue && updatedAccount.isActive.Value != existingAccount.isActive)
+            {
+                changes.Add("Active Status");
+                existingAccount.isActive = updatedAccount.isActive.Value;
+            }
+
+            if (updatedAccount.ProfilePicture != null && updatedAccount.ProfilePicture != existingAccount.ProfilePicture)
+            {
+                changes.Add("Profile Picture");
+                existingAccount.ProfilePicture = updatedAccount.ProfilePicture;
+            }
+
+            if (updatedAccount.Specialization != null && updatedAccount.Specialization != existingAccount.Specialization)
+            {
+                changes.Add("Specialization");
+                existingAccount.Specialization = updatedAccount.Specialization;
+            }
+
+            if (!changes.Any())
+                return Ok(new { message = "No changes detected." });
+
+            existingAccount.UpdatedAt = PhTime;
+
+            var fieldSummary = changes.Count == 1
+                ? changes[0]
+                : string.Join(", ", changes[..^1]) + " and " + changes[^1];
+
+            bool isSelfEdit = editorId == id;
+            string note = isSelfEdit
+                ? $"{existingAccount.Name} updated their own {fieldSummary}."
+                : $"The {fieldSummary} of {existingAccount.Name}'s account was updated by Admin {editorAccount.Name}.";
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                AccountId = id,
+                Action = "UPDATED",
+                NewValue = string.Join(", ", changes),
+                Note = note,
+                CreatedAt = PhTime
+            });
+
             await _context.SaveChangesAsync();
-            return NoContent();
+
+            string responseMessage = isSelfEdit
+                ? $"Your {fieldSummary} {(changes.Count == 1 ? "has" : "have")} been updated successfully."
+                : $"The {fieldSummary} of {existingAccount.Name}'s account {(changes.Count == 1 ? "has" : "have")} been updated successfully.";
+
+            return Ok(new
+            {
+                message = responseMessage,
+                updatedFields = changes,
+                account = new
+                {
+                    existingAccount.Name,
+                    existingAccount.Role,
+                    existingAccount.Specialization,
+                    existingAccount.isActive,
+                    existingAccount.ProfilePicture,
+                    existingAccount.UpdatedAt
+                }
+            });
         }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> RemoveProfilePicture(int id)
+        {
+            var account = await _context.Accounts.FindAsync(id);
+            if (account == null)
+                return NotFound("Account not found.");
+
+            if (string.IsNullOrEmpty(account.ProfilePicture))
+                return BadRequest("No profile picture to remove.");
+
+            account.ProfilePicture = null;
+            account.UpdatedAt = PhTime;
+
+            _context.AuditLogs.Add(new AuditLog
+            {
+                AccountId = account.Id,
+                Action = "DELETED",
+                Note = $"Profile picture removed by {account.Name}, {account.Role}.",
+                CreatedAt = PhTime
+            });
+
+            await _context.SaveChangesAsync();
+            return Ok("Profile picture has been removed.");
+        }
+
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAccount(int id, [FromQuery] int adminId)
@@ -181,12 +410,12 @@ namespace TaskManagement.Controllers
 
             existingAccount.isActive = false;
 
-            _context.TimeLogs.Add(new TimeLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
-                Action = "Account Deleted",
-                Note = $"Account deleted by {admin.Name}, ({admin.Role})",
-                CreatedAt = DateTime.UtcNow
+                Action = "DELETED",
+                Note = $"User {existingAccount.Name} was deactivated by {admin.Name}.",
+                CreatedAt = PhTime
             });
 
             await _context.SaveChangesAsync();
@@ -206,12 +435,12 @@ namespace TaskManagement.Controllers
 
             existingAccount.isActive = true;
 
-            _context.TimeLogs.Add(new TimeLog
+            _context.AuditLogs.Add(new AuditLog
             {
                 AccountId = adminId,
-                Action = "Account Reactivated",
-                Note = $"Account Reactivated by {admin.Name}, ({admin.Role})",
-                CreatedAt = DateTime.UtcNow
+                Action = "RESTORED",
+                Note = $"Account Reactivated by {admin.Name}.",
+                CreatedAt = PhTime
             });
 
             await _context.SaveChangesAsync();
@@ -246,7 +475,7 @@ namespace TaskManagement.Controllers
             }
 
             account.ProfilePicture = $"/uploads/profiles/{fileName}";
-            account.UpdatedAt = DateTime.UtcNow;
+            account.UpdatedAt = PhTime;
             await _context.SaveChangesAsync();
 
             return Ok(new { profilePicture = account.ProfilePicture });
